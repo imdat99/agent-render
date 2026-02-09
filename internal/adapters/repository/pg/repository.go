@@ -52,9 +52,34 @@ func (r *Repository) ListJobs(ctx context.Context, offset, limit int) ([]*domain
 	return jobs, nil
 }
 
+func (r *Repository) ListJobsByAgent(ctx context.Context, agentID int64, offset, limit int) ([]*domain.Job, error) {
+	var jobs []*domain.Job
+	if err := r.db.WithContext(ctx).Where("agent_id = ?", agentID).Order("created_at desc").Offset(offset).Limit(limit).Find(&jobs).Error; err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
 func (r *Repository) CountJobs(ctx context.Context) (int64, error) {
 	var count int64
 	if err := r.db.WithContext(ctx).Model(&domain.Job{}).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *Repository) CountActiveJobsByAgent(ctx context.Context, agentID int64) (int64, error) {
+	var count int64
+	// Active jobs are those with status 'running'
+	if err := r.db.WithContext(ctx).Model(&domain.Job{}).Where("agent_id = ? AND status = ?", agentID, domain.JobStatusRunning).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *Repository) CountJobsByAgent(ctx context.Context, agentID int64) (int64, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&domain.Job{}).Where("agent_id = ?", agentID).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil

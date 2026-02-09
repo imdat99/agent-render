@@ -70,98 +70,167 @@ func (s *Server) getAgentIDFromContext(ctx context.Context) (int64, string, bool
 }
 
 func (s *Server) Next(ctx context.Context, req *proto.NextRequest) (*proto.NextResponse, error) {
+	// Deprecated: Agent now uses StreamJobs
+	return nil, status.Error(codes.Unimplemented, "use StreamJobs")
+}
+
+func (s *Server) StreamJobs(req *proto.StreamOptions, stream proto.Woodpecker_StreamJobsServer) error {
+	ctx := stream.Context()
 	agentID, _, ok := s.getAgentIDFromContext(ctx)
 	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "invalid or missing token")
+		return status.Error(codes.Unauthenticated, "invalid or missing token")
 	}
 
-	// Update agent heartbeat in memory
-	s.agentManager.UpdateHeartbeat(agentID)
+	log.Printf("Agent %d connected to Job Stream", agentID)
 
-	// Capture hostname from Filter labels if present and agent name is still "Pending Agent"
-	if req.Filter != nil && req.Filter.Labels != nil {
-		if hostname, exists := req.Filter.Labels["hostname"]; exists && hostname != "" {
-			// Check if agent still has the placeholder name
-			agent, err := s.jobService.GetAgent(ctx, agentID)
-			if err == nil && agent != nil && agent.Name == "Pending Agent" {
-				// Update agent name with hostname
-				log.Printf("Updating agent ID=%d name to hostname: %s", agentID, hostname)
-				if _, err := s.jobService.UpdateAgentInfo(ctx, agent.ID, hostname, agent.Platform, agent.Backend, agent.Version, agent.Capacity); err != nil {
-					log.Printf("Failed to update agent name: %v", err)
+	// Update agent heartbeat in database
+	if err := s.jobService.UpdateAgentHeartbeat(ctx, agentID); err != nil {
+		log.Printf("Failed to update heartbeat for agent %d: %v", agentID, err)
+	}
+
+	// Load agent info from database and register in memory if not already
+	agent, err := s.jobService.GetAgent(ctx, agentID)
+	if err == nil && agent != nil {
+		s.agentManager.Register(agentID, agent.Name, agent.Platform, agent.Backend, agent.Version, agent.Capacity)
+	}
+
+	// Loop to send jobs
+	ticker := time.NewTicker(2 * time.Second) // Poll interval
+	defer ticker.Stop()
+
+	// Subscribe to cancellation events for this agent
+	cancelCh, err := s.jobService.SubscribeCancel(ctx, agentID)
+	if err != nil {
+		log.Printf("Failed to subscribe to cancellations for agent %d: %v", agentID, err)
+		// Continue without cancellation support? Or return error?
+		// Better to continue log, but maybe retry?
+	}
+
+	for {
+		select {
+		case jobID := <-cancelCh:
+			log.Printf("Received cancel signal for job %s directed to agent %d", jobID, agentID)
+			// Verify if agent is running this job
+			if s.isJobAssigned(agentID, jobID) {
+				log.Printf("Forwarding cancel signal for job %s to agent %d", jobID, agentID)
+				if err := stream.Send(&proto.Workflow{
+					Id:     jobID,
+					Cancel: true,
+				}); err != nil {
+					log.Printf("Failed to send cancel signal to agent %d: %v", agentID, err)
+				}
+			} else {
+				log.Printf("Job %s not currently assigned to agent %d, ignoring cancel", jobID, agentID)
+			}
+		case <-ctx.Done():
+			log.Printf("Agent %d disconnected from job stream", agentID)
+			return nil
+		case <-ticker.C:
+			// Heartbeat in both database and memory
+			if err := s.jobService.UpdateAgentHeartbeat(ctx, agentID); err != nil {
+				log.Printf("Failed to update heartbeat: %v", err)
+			}
+			s.agentManager.UpdateHeartbeat(agentID)
+
+			// Check for jobs with a timeout to ensure we can send heartbeats
+			// Create a context with small timeout (e.g. 1 sec less than ticker or just short)
+			// Actually ticker is 2s. Let's wait 1s.
+			jobCtx, jobCancel := context.WithTimeout(ctx, 1*time.Second)
+			job, err := s.jobService.GetNextJob(jobCtx)
+			jobCancel()
+
+			if err != nil {
+				// Check if it's a timeout/deadline exceeded or no job
+				// If so, continue to next tick
+				continue
+			}
+
+			if job == nil {
+				continue
+			}
+
+			log.Printf("Assigning job %s to agent %d (via stream)", job.ID, agentID)
+			s.trackJobAssignment(agentID, job.ID)
+
+			// Parse config
+			var config map[string]interface{}
+			if err := json.Unmarshal([]byte(job.Config), &config); err != nil {
+				log.Printf("Invalid config for job %s", job.ID)
+				s.jobService.UpdateJobStatus(ctx, job.ID, domain.JobStatusFailure)
+				continue
+			}
+
+			// Extract image/commands matching simplified logic
+			// ... (reuse logic from Next)
+			image, _ := config["image"].(string)
+			if image == "" {
+				image = "alpine"
+			}
+			var commands []string
+			if cmdList, ok := config["commands"].([]interface{}); ok {
+				for _, cmd := range cmdList {
+					if cmdStr, ok := cmd.(string); ok {
+						commands = append(commands, cmdStr)
+					}
 				}
 			}
-		}
-	}
+			if len(commands) == 0 {
+				commands = []string{"echo 'No commands specified'"}
+			}
 
-	// Create a context with timeout to avoid blocking forever if no jobs
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+			jobPayload := map[string]interface{}{
+				"image":       image,
+				"commands":    commands,
+				"environment": map[string]string{},
+			}
+			payloadBytes, _ := json.Marshal(jobPayload)
 
-	job, err := s.jobService.GetNextJob(ctxWithTimeout)
-	if err != nil {
-		// If timeout/no job, return default error to tell agent to retry later
-		return nil, status.Error(codes.NotFound, "no work")
-	}
-
-	log.Printf("Assigning job %s to agent %d", job.ID, agentID)
-
-	// Track job assignment to agent (for cleanup on disconnect)
-	s.trackJobAssignment(agentID, job.ID)
-
-	// Parse job config JSON
-	var config map[string]interface{}
-	if err := json.Unmarshal([]byte(job.Config), &config); err != nil {
-		log.Printf("Failed to parse job config for job %s: %v", job.ID, err)
-		// Mark job as failed and return error
-		_ = s.jobService.UpdateJobStatus(ctx, job.ID, domain.JobStatusFailure)
-		s.untrackJobAssignment(agentID, job.ID)
-		return nil, status.Error(codes.Internal, "invalid job configuration")
-	}
-
-	// Extract image and commands
-	image, _ := config["image"].(string)
-	if image == "" {
-		image = "alpine"
-	}
-
-	// Extract commands
-	var commands []string
-	if cmdList, ok := config["commands"].([]interface{}); ok {
-		for _, cmd := range cmdList {
-			if cmdStr, ok := cmd.(string); ok {
-				commands = append(commands, cmdStr)
+			// Send to stream
+			err = stream.Send(&proto.Workflow{
+				Id:      job.ID,
+				Timeout: 3600,
+				Payload: payloadBytes,
+			})
+			if err != nil {
+				log.Printf("Failed to send job %s to agent %d: %v. Re-queueing...", job.ID, agentID, err)
+				// Re-queue job
+				// Assuming UpdateJobStatus(Queued) is enough
+				s.jobService.UpdateJobStatus(ctx, job.ID, domain.JobStatusPending)
+				s.untrackJobAssignment(agentID, job.ID)
+				return err
 			}
 		}
 	}
-	if len(commands) == 0 {
-		commands = []string{"echo 'No commands specified'"}
+}
+
+func (s *Server) SubmitStatus(stream proto.Woodpecker_SubmitStatusServer) error {
+	ctx := stream.Context()
+	agentID, _, ok := s.getAgentIDFromContext(ctx)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "invalid or missing token")
 	}
 
-	// Build simple job payload for custom agent
-	jobPayload := map[string]interface{}{
-		"image":       image,
-		"commands":    commands,
-		"environment": map[string]string{},
+	for {
+		update, err := stream.Recv()
+		if err != nil {
+			log.Printf("SubmitStatus stream ended for agent %d: %v", agentID, err)
+			return nil
+		}
+
+		switch update.Type {
+		case 0, 1: // stdout, stderr
+			// Use existing ProcessLog (it parses progress too if in log)
+			_ = s.jobService.ProcessLog(ctx, update.StepUuid, update.Data)
+		case 4: // Progress (if sent separately)
+			// Parse float
+			var progress float64
+			fmt.Sscanf(string(update.Data), "%f", &progress)
+			_ = s.jobService.UpdateJobProgress(ctx, update.StepUuid, progress)
+		case 5: // System Resources
+			// Publish to PubSub for Dashboard
+			_ = s.jobService.PublishSystemResources(ctx, agentID, update.Data)
+		}
 	}
-
-	payloadBytes, err := json.Marshal(jobPayload)
-	if err != nil {
-		log.Printf("Failed to marshal job payload for job %s: %v", job.ID, err)
-		s.untrackJobAssignment(agentID, job.ID)
-		return nil, status.Error(codes.Internal, "failed to create job payload")
-	}
-
-	// Debug: log the payload being sent
-	log.Printf("Sending job payload for %s: %s", job.ID, string(payloadBytes))
-
-	// Convert Job to Woodpecker Workflow
-	return &proto.NextResponse{
-		Workflow: &proto.Workflow{
-			Id:      job.ID,
-			Timeout: 3600,
-			Payload: payloadBytes,
-		},
-	}, nil
 }
 
 func (s *Server) Init(ctx context.Context, req *proto.InitRequest) (*proto.Empty, error) {
@@ -271,7 +340,13 @@ func (s *Server) RegisterAgent(ctx context.Context, req *proto.RegisterAgentRequ
 		name = fmt.Sprintf("agent-%d", id)
 	}
 
-	// Register agent in memory (no database)
+	// Update agent info in database
+	_, err := s.jobService.UpdateAgentInfo(ctx, id, name, req.Info.Platform, req.Info.Backend, req.Info.Version, req.Info.Capacity)
+	if err != nil {
+		log.Printf("Failed to update agent %d in database: %v", id, err)
+	}
+
+	// Register agent in memory
 	s.agentManager.Register(id, name, req.Info.Platform, req.Info.Backend, req.Info.Version, req.Info.Capacity)
 
 	log.Printf("Successfully registered agent ID=%d with Capacity=%d, Name=%s", id, req.Info.Capacity, name)
@@ -320,6 +395,19 @@ func (s *Server) getAgentJobs(agentID int64) []string {
 		})
 	}
 	return jobs
+}
+
+// isJobAssigned checks if a job is currently assigned to an agent
+func (s *Server) isJobAssigned(agentID int64, jobID string) bool {
+	if jobSetInterface, ok := s.agentJobs.Load(agentID); ok {
+		jobSet, ok := jobSetInterface.(*sync.Map)
+		if !ok {
+			return false
+		}
+		_, found := jobSet.Load(jobID)
+		return found
+	}
+	return false
 }
 
 func (s *Server) UnregisterAgent(ctx context.Context, req *proto.Empty) (*proto.Empty, error) {

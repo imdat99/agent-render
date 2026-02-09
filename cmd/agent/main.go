@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
+	"runtime"
 	"syscall"
 
 	"picpic.render/internal/agent"
@@ -22,13 +22,7 @@ func main() {
 		log.Fatal("AGENT_SECRET environment variable is required")
 	}
 
-	capacityStr := os.Getenv("AGENT_CAPACITY")
-	capacity := 1
-	if capacityStr != "" {
-		if c, err := strconv.Atoi(capacityStr); err == nil && c > 0 {
-			capacity = c
-		}
-	}
+	capacity := runtime.NumCPU()
 
 	log.Printf("Starting Custom Agent")
 	log.Printf("Server: %s", serverAddr)

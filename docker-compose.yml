@@ -31,26 +31,53 @@ services:
       timeout: 3s
       retries: 5
 
+  # jaeger:
+  #   image: jaegertracing/all-in-one:latest
+  #   ports:
+  #     - "16686:16686"  # Jaeger UI
+  #     - "4317:4317"    # OTLP gRPC receiver
+  #     - "4318:4318"    # OTLP HTTP receiver
+  #   environment:
+  #     - COLLECTOR_OTLP_ENABLED=true
+  #   networks:
+  #     - picnic-net
+
   server:
-    build: .
-    image: picpic-render-server:latest
+    build: 
+      context: .
+      dockerfile: Dockerfile
     environment:
       PORT: 9000
-      # HTTP_PORT: 8080
+      HTTP_PORT: 8080
       DB_URL: postgres://user:password@postgres:5432/picpic?sslmode=disable
       REDIS_URL: redis://redis:6379/0
-      WOODPECKER_AGENT_SECRET: mysecretkey
+      AGENT_SECRET: mysecretkey
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      ENABLE_METRICS: "true"
+      ENABLE_TRACING: "true"
+      # OTLP_ENDPOINT: "jaeger:4317"
+      SERVICE_NAME: "server"
+    volumes:
+      - ./web:/app/web
     ports:
-      - "9000:9000"
       - "8080:8080"
+      - "9000:9000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # jaeger:
+      #   condition: service_started
     networks:
       - picnic-net
     restart: on-failure
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   agent-1:
     build:
@@ -59,16 +86,12 @@ services:
     environment:
       - AGENT_SERVER=server:9000
       - AGENT_SECRET=mysecretkey
-      - AGENT_CAPACITY=2
       - DOCKER_API_VERSION=1.44
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    depends_on:
-      server:
-        condition: service_started
     networks:
       - picnic-net
-    restart: on-failure
+    restart: always
 
 volumes:
   postgres_data:

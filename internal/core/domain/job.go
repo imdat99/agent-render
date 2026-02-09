@@ -17,6 +17,7 @@ const (
 type Job struct {
 	ID            string    `json:"id" gorm:"primaryKey"`
 	Status        JobStatus `json:"status"`
+	Priority      int       `json:"priority" gorm:"default:0;index"` // 0-10, higher = more priority
 	InputURL      string    `json:"input_url"`
 	OutputURL     string    `json:"output_url"`
 	TotalDuration int64     `json:"total_duration"` // In microseconds
@@ -24,7 +25,7 @@ type Job struct {
 	Progress      float64   `json:"progress"`
 	AgentID       int64     `json:"agent_id"`
 	Logs          string    `json:"logs"`
-	Config        string    `json:"config"` // YAML config for Woodpecker
+	Config        string    `json:"config"`                         // YAML config for Woodpecker
 	Cancelled     bool      `json:"cancelled" gorm:"default:false"` // Cancellation flag
 	RetryCount    int       `json:"retry_count" gorm:"default:0"`   // Number of retries
 	MaxRetries    int       `json:"max_retries" gorm:"default:3"`   // Max retry attempts

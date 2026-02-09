@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -11,9 +12,11 @@ import (
 )
 
 const (
-	JobQueueKey    = "job:queue"
-	LogChannel     = "job:logs"
-	CancelChannel  = "job:cancels" // Channel for job cancellation signals
+	JobQueueKey      = "job:queue"
+	LogChannel       = "job:logs"
+	ResourceChannel  = "agent:resources"
+	CancelChannel    = "job:cancels" // Channel for job cancellation signals
+	JobUpdateChannel = "job:updates" // Channel for job status updates
 )
 
 type RedisAdapter struct {
@@ -29,39 +32,64 @@ func NewRedisAdapter(url string) (ports.JobQueue, ports.LogPubSub, *redis.Client
 	return &RedisAdapter{client: client}, &RedisAdapter{client: client}, client, nil
 }
 
-// Queue Implementation
+// Queue Implementation with Priority Support
 func (r *RedisAdapter) Enqueue(ctx context.Context, job *domain.Job) error {
 	data, err := json.Marshal(job)
 	if err != nil {
 		return err
 	}
-	return r.client.RPush(ctx, JobQueueKey, data).Err()
+
+	// Use sorted set with score = -(priority * 1000000 + timestamp)
+	// This ensures higher priority jobs come first, and within same priority, FIFO
+	timestamp := time.Now().UnixNano()
+	score := float64(-(int64(job.Priority) * 1000000000) - timestamp)
+
+	return r.client.ZAdd(ctx, JobQueueKey, redis.Z{
+		Score:  score,
+		Member: data,
+	}).Err()
 }
 
 func (r *RedisAdapter) Dequeue(ctx context.Context) (*domain.Job, error) {
-	// Blocking pop with loop to respect context cancellation more reliably
-	// We use a short timeout (1s) and check context in loop
+	// Use sorted set to get highest priority job
 	for {
 		// Check context before call
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 
-		res, err := r.client.BLPop(ctx, 1*time.Second, JobQueueKey).Result()
+		// Get the job with lowest score (highest priority)
+		// ZPOPMIN is atomic and removes the element
+		res, err := r.client.ZPopMin(ctx, JobQueueKey, 1).Result()
 		if err != nil {
 			if err == redis.Nil {
-				continue // Timeout, retry
+				// Queue is empty, wait a bit and retry
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(1 * time.Second):
+					continue
+				}
 			}
-			// If context is canceled, BLPop might return error, we should return ctx.Err() if possibly
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
 			return nil, err
 		}
 
-		// res[0] is key, res[1] is value
+		if len(res) == 0 {
+			// Queue is empty, wait and retry
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(1 * time.Second):
+				continue
+			}
+		}
+
+		// res[0].Member is the job data
 		var job domain.Job
-		if err := json.Unmarshal([]byte(res[1]), &job); err != nil {
+		if err := json.Unmarshal([]byte(res[0].Member.(string)), &job); err != nil {
 			return nil, err
 		}
 		return &job, nil
@@ -101,6 +129,108 @@ func (r *RedisAdapter) Subscribe(ctx context.Context, jobID string) (<-chan doma
 			if jobID == "" || entry.JobID == jobID {
 				ch <- entry
 			}
+		}
+	}()
+	return ch, nil
+}
+
+func (r *RedisAdapter) PublishResource(ctx context.Context, agentID int64, data []byte) error {
+	// data is assumed to be JSON {"cpu":..., "ram":...}
+	// We want to wrap it in SystemResource struct
+	var res map[string]interface{}
+	if err := json.Unmarshal(data, &res); err != nil {
+		return err
+	}
+
+	// Better parsing if we trust the source or just pass it as is?
+	// The problem is `data` is `[]byte`.
+	// Let's decode to `domain.SystemResource` partially?
+	// Or just create a struct.
+	// Let's assume input JSON matches `cpu` and `ram` keys.
+
+	resource := domain.SystemResource{
+		AgentID: agentID,
+	}
+	if cpu, ok := res["cpu"].(float64); ok {
+		resource.CPU = cpu
+	}
+	if ram, ok := res["ram"].(float64); ok {
+		resource.RAM = ram
+	}
+
+	payload, err := json.Marshal(resource)
+	if err != nil {
+		return err
+	}
+
+	return r.client.Publish(ctx, ResourceChannel, payload).Err()
+}
+
+func (r *RedisAdapter) SubscribeResources(ctx context.Context) (<-chan domain.SystemResource, error) {
+	pubsub := r.client.Subscribe(ctx, ResourceChannel)
+	ch := make(chan domain.SystemResource)
+
+	go func() {
+		defer pubsub.Close()
+		defer close(ch)
+
+		for msg := range pubsub.Channel() {
+			var entry domain.SystemResource
+			if err := json.Unmarshal([]byte(msg.Payload), &entry); err != nil {
+				continue
+			}
+			ch <- entry
+		}
+	}()
+	return ch, nil
+}
+
+// Cancel PubSub implementation
+func (r *RedisAdapter) PublishCancel(ctx context.Context, agentID int64, jobID string) error {
+	channel := fmt.Sprintf("agent:%d:cancels", agentID)
+	// Publish just the job ID
+	return r.client.Publish(ctx, channel, jobID).Err()
+}
+
+func (r *RedisAdapter) SubscribeCancel(ctx context.Context, agentID int64) (<-chan string, error) {
+	channel := fmt.Sprintf("agent:%d:cancels", agentID)
+	pubsub := r.client.Subscribe(ctx, channel)
+	ch := make(chan string)
+
+	go func() {
+		defer pubsub.Close()
+		defer close(ch)
+
+		for msg := range pubsub.Channel() {
+			ch <- msg.Payload // Payload is jobID
+		}
+	}()
+	return ch, nil
+}
+
+// Job Updates PubSub implementation
+func (r *RedisAdapter) PublishJobUpdate(ctx context.Context, jobID string, status string) error {
+	payload := map[string]string{
+		"job_id": jobID,
+		"status": status,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return r.client.Publish(ctx, JobUpdateChannel, data).Err()
+}
+
+func (r *RedisAdapter) SubscribeJobUpdates(ctx context.Context) (<-chan string, error) {
+	pubsub := r.client.Subscribe(ctx, JobUpdateChannel)
+	ch := make(chan string)
+
+	go func() {
+		defer pubsub.Close()
+		defer close(ch)
+
+		for msg := range pubsub.Channel() {
+			ch <- msg.Payload
 		}
 	}()
 	return ch, nil

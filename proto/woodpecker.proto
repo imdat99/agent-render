@@ -35,6 +35,10 @@ service Woodpecker {
   rpc RegisterAgent   (RegisterAgentRequest) returns (RegisterAgentResponse) {}
   rpc UnregisterAgent (Empty)                returns (Empty) {}
   rpc ReportHealth    (ReportHealthRequest)  returns (Empty) {}
+  
+  // New Streaming RPCs
+  rpc StreamJobs      (StreamOptions)        returns (stream Workflow) {}
+  rpc SubmitStatus    (stream StatusUpdate)  returns (Empty) {}
 }
 
 //
@@ -74,6 +78,7 @@ message Workflow {
   string id = 1;
   int64 timeout = 2;
   bytes payload = 3;
+  bool cancel = 4;
 }
 
 //
@@ -166,4 +171,15 @@ message AuthResponse {
   string status        = 1;
   int64  agent_id      = 2;
   string access_token  = 3;
+}
+
+message StreamOptions {
+  Filter filter = 1;
+}
+
+message StatusUpdate {
+   string step_uuid = 1;
+   int64  time = 2;
+   int32  type = 3; // 0=stdout, 1=stderr, 2=exit-code, 3=metadata, 4=progress, 5=system-resource
+   bytes  data = 4;
 }

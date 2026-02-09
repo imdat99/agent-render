@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PicPic Render | Premium Distributed Rendering</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -244,21 +245,51 @@
 
             <!-- Job Info Header (Hidden by default) -->
             <div id="job-header"
-                class="hidden h-14 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between px-6 shrink-0 relative z-10 backdrop-blur-sm">
-                <div class="flex items-center gap-4">
-                    <div class="flex flex-col">
-                        <h3 class="font-mono text-sm text-indigo-300 font-medium" id="current-job-id">JOB-ID</h3>
-                        <span class="text-[10px] text-slate-500 font-light" id="current-job-image">image:tag</span>
+                class="hidden border-b border-slate-800 bg-slate-900/30 p-4 shrink-0 relative z-10 backdrop-blur-sm grid grid-cols-[1fr_auto] gap-4">
+                <div class="flex flex-col gap-1">
+                    <div class="flex items-center gap-3">
+                        <h3 class="font-mono text-base text-indigo-300 font-bold" id="current-job-id">JOB-ID</h3>
+                        <span id="current-job-status"
+                            class="px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wide bg-slate-800 text-slate-400">
+                            STATUS
+                        </span>
+                        <button id="cancel-job-btn"
+                            class="hidden px-2 py-0.5 rounded border border-red-500/30 bg-red-500/10 text-red-500 text-xs font-bold uppercase tracking-wide hover:bg-red-500/20 transition-colors">
+                            Cancel
+                        </button>
                     </div>
-                    <span id="current-job-status"
-                        class="px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wide bg-slate-800 text-slate-400">
-                        STATUS
-                    </span>
+                    <div class="flex items-center gap-4 text-xs text-slate-400 font-mono">
+                        <div class="flex items-center gap-1.5" title="Image">
+                            <span class="text-slate-500">IMG:</span>
+                            <span id="current-job-image" class="text-slate-300">image:tag</span>
+                        </div>
+                        <div class="flex items-center gap-1.5" title="Agent">
+                            <span class="text-slate-500">NODE:</span>
+                            <span id="current-job-agent" class="text-slate-300">Unassigned</span>
+                        </div>
+                        <div class="flex items-center gap-1.5" title="Duration">
+                            <span class="text-slate-500">TIME:</span>
+                            <span id="current-job-duration" class="text-slate-300">0s</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="flex items-center gap-2">
-                    <div class="flex items-center gap-2 text-xs text-slate-500 mr-4 font-mono">
-                        <span>Duration:</span>
-                        <span id="current-job-duration" class="text-slate-300">0s</span>
+
+                <div class="hidden md:block text-right">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Command</div>
+                    <code id="current-job-command"
+                        class="text-xs text-emerald-400/80 bg-slate-950/50 border border-slate-800 px-2 py-1 rounded inline-block max-w-[250px] truncate font-mono select-all">...</code>
+                </div>
+
+                <!-- Progress Bar -->
+                <div class="col-span-2 hidden" id="job-progress-container">
+                    <div class="flex justify-between mb-1">
+                        <span class="text-[10px] font-medium text-blue-400 uppercase tracking-wider">Progress</span>
+                        <span class="text-[10px] font-medium text-blue-400 font-mono"
+                            id="current-job-progress-text">0%</span>
+                    </div>
+                    <div class="w-full bg-slate-800 rounded-full h-1">
+                        <div class="bg-blue-500 h-1 rounded-full transition-all duration-300 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+                            style="width: 0%" id="current-job-progress"></div>
                     </div>
                 </div>
             </div>
@@ -332,7 +363,66 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <!-- Agent Details Modal -->
+    <div id="agent-modal"
+        class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+        <div
+            class="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-xl shadow-2xl flex flex-col max-h-[85vh]">
+            <div class="flex items-center justify-between p-4 border-b border-slate-800">
+                <h3 id="agent-modal-title" class="text-lg font-semibold text-white">Agent Details</h3>
+                <button id="close-agent-modal" class="text-slate-400 hover:text-white transition-colors">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 space-y-6">
+                <!-- Info Grid -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
+                        <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">Status</div>
+                        <div id="agent-modal-status" class="font-medium text-emerald-400">Online</div>
+                    </div>
+                    <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
+                        <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">Platform</div>
+                        <div id="agent-modal-platform" class="font-mono text-sm text-slate-300">linux/amd64</div>
+                    </div>
+                    <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
+                        <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">Backend</div>
+                        <div id="agent-modal-backend" class="font-mono text-sm text-slate-300">docker</div>
+                    </div>
+                    <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
+                        <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">Resources</div>
+                        <div class="flex items-center gap-3 mt-1">
+                            <div class="flex items-center gap-1.5">
+                                <div class="w-2 h-2 rounded-full bg-indigo-500"></div>
+                                <span id="agent-modal-cpu" class="text-xs font-mono text-slate-300">0% CPU</span>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <div class="w-2 h-2 rounded-full bg-purple-500"></div>
+                                <span id="agent-modal-capacity" class="text-xs font-mono text-slate-300">2 cores</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Jobs -->
+                <div>
+                    <h4 class="text-sm font-medium text-white mb-3 flex items-center gap-2">
+                        Active Jobs
+                        <span id="agent-modal-jobs-count"
+                            class="text-xs bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded-full">0</span>
+                    </h4>
+                    <div id="agent-modal-jobs-list" class="space-y-2">
+                        <!-- Job Items -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="js/app.js"></script>
 </body>
 
 </html>

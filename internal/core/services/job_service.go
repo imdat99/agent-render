@@ -35,10 +35,11 @@ func NewJobService(
 	}
 }
 
-func (s *JobService) CreateJob(ctx context.Context, image string, config []byte) (*domain.Job, error) {
+func (s *JobService) CreateJob(ctx context.Context, image string, config []byte, priority int) (*domain.Job, error) {
 	job := &domain.Job{
 		ID:        fmt.Sprintf("job-%s", uuid.New().String()), // UUID for unique ID generation
 		Status:    domain.JobStatusPending,
+		Priority:  priority,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		Config:    string(config),
@@ -156,6 +157,63 @@ func (s *JobService) ListAgents(ctx context.Context) ([]*domain.Agent, error) {
 	return s.agentRepo.ListAgents(ctx)
 }
 
+type AgentWithStats struct {
+	*domain.Agent
+	ActiveJobCount int64 `json:"active_job_count"`
+}
+
+func (s *JobService) ListAgentsWithStats(ctx context.Context) ([]*AgentWithStats, error) {
+	agents, err := s.agentRepo.ListAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*AgentWithStats
+	for _, agent := range agents {
+		count, err := s.jobRepo.CountActiveJobsByAgent(ctx, agent.ID)
+		if err != nil {
+			log.Printf("Failed to count active jobs for agent %d: %v", agent.ID, err)
+			count = 0
+		}
+		result = append(result, &AgentWithStats{
+			Agent:          agent,
+			ActiveJobCount: count,
+		})
+	}
+	return result, nil
+}
+
+func (s *JobService) ListJobsByAgent(ctx context.Context, agentID int64, offset, limit int) (*PaginatedJobs, error) {
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+
+	jobs, err := s.jobRepo.ListJobsByAgent(ctx, agentID, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	total, err := s.jobRepo.CountJobsByAgent(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PaginatedJobs{
+		Jobs:    jobs,
+		Total:   total,
+		Offset:  offset,
+		Limit:   limit,
+		HasMore: offset+len(jobs) < int(total),
+	}, nil
+}
+
+func (s *JobService) GetActiveJobCount(ctx context.Context, agentID int64) (int64, error) {
+	return s.jobRepo.CountActiveJobsByAgent(ctx, agentID)
+}
+
 func (s *JobService) GetNextJob(ctx context.Context) (*domain.Job, error) {
 	// Blocking dequeue
 	return s.queue.Dequeue(ctx)
@@ -240,7 +298,16 @@ func (s *JobService) UpdateJobStatus(ctx context.Context, jobID string, status d
 	}
 	job.Status = status
 	job.UpdatedAt = time.Now()
-	return s.jobRepo.Update(ctx, job)
+	if err := s.jobRepo.Update(ctx, job); err != nil {
+		return err
+	}
+
+	// Publish job update event
+	if err := s.pubsub.PublishJobUpdate(ctx, jobID, string(status)); err != nil {
+		log.Printf("Failed to publish job update: %v", err)
+	}
+
+	return nil
 }
 
 func (s *JobService) CancelJob(ctx context.Context, jobID string) error {
@@ -263,7 +330,18 @@ func (s *JobService) CancelJob(ctx context.Context, jobID string) error {
 		return fmt.Errorf("failed to update job: %w", err)
 	}
 
+	// Publish job update event (status change to Cancelled)
+	if err := s.pubsub.PublishJobUpdate(ctx, jobID, string(domain.JobStatusCancelled)); err != nil {
+		log.Printf("Failed to publish job update: %v", err)
+	}
+
 	// Publish cancellation event to notify agents
+	if job.AgentID != 0 {
+		if err := s.pubsub.PublishCancel(ctx, job.AgentID, job.ID); err != nil {
+			log.Printf("Failed to publish cancel signal: %v", err)
+		}
+	}
+
 	if err := s.pubsub.Publish(ctx, jobID, "[SYSTEM] Job cancelled by user", -1); err != nil {
 		log.Printf("Failed to publish cancel event: %v", err)
 	}
@@ -305,4 +383,41 @@ func (s *JobService) RetryJob(ctx context.Context, jobID string) (*domain.Job, e
 	}
 
 	return job, nil
+}
+
+func (s *JobService) UpdateJobProgress(ctx context.Context, jobID string, progress float64) error {
+	job, err := s.jobRepo.GetJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+
+	job.Progress = progress
+	job.UpdatedAt = time.Now()
+
+	if err := s.jobRepo.Update(ctx, job); err != nil {
+		return err
+	}
+
+	// Also publish log entry with progress so dashboard sees it on log stream too?
+	// Or maybe the dashboard should listen to a progress channel?
+	// The current PubSub.Publish takes progress as arg, so it's sent with log line.
+	// But here we have no log line.
+	// We can send empty log line.
+	return s.pubsub.Publish(ctx, jobID, "", progress)
+}
+
+func (s *JobService) PublishSystemResources(ctx context.Context, agentID int64, data []byte) error {
+	return s.pubsub.PublishResource(ctx, agentID, data)
+}
+
+func (s *JobService) SubscribeSystemResources(ctx context.Context) (<-chan domain.SystemResource, error) {
+	return s.pubsub.SubscribeResources(ctx)
+}
+
+func (s *JobService) SubscribeCancel(ctx context.Context, agentID int64) (<-chan string, error) {
+	return s.pubsub.SubscribeCancel(ctx, agentID)
+}
+
+func (s *JobService) SubscribeJobUpdates(ctx context.Context) (<-chan string, error) {
+	return s.pubsub.SubscribeJobUpdates(ctx)
 }

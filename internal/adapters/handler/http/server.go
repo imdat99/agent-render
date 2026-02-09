@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	grpcHandler "picpic.render/internal/adapters/handler/grpc"
+	"picpic.render/internal/core/domain"
 	"picpic.render/internal/core/services"
 )
 
@@ -37,6 +38,7 @@ func NewServer(jobService *services.JobService, healthSvc *services.HealthServic
 func (s *Server) routes() {
 	s.router.Use(middleware.Logger)
 	s.router.Use(middleware.Recoverer)
+	s.router.Use(MetricsMiddleware) // Add metrics middleware
 	s.router.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -45,6 +47,15 @@ func (s *Server) routes() {
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+
+	// Metrics endpoint
+	s.router.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		MetricsHandler().ServeHTTP(w, r)
+	})
+
+	// Kubernetes probes
+	s.router.Get("/health/live", s.handleLiveness)
+	s.router.Get("/health/ready", s.handleReadiness)
 
 	s.router.Get("/api/health", s.handleHealth)
 	s.router.Get("/api/health/detailed", s.handleDetailedHealth)
@@ -75,6 +86,19 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(status))
 }
 
+func (s *Server) handleLiveness(w http.ResponseWriter, r *http.Request) {
+	// Liveness probe - just check if server is running
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("ok"))
+}
+
+func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
+	// Readiness probe - check if server can handle requests
+	status, code := s.healthSvc.SimpleHealthCheck(r.Context())
+	w.WriteHeader(code)
+	w.Write([]byte(status))
+}
+
 func (s *Server) handleDetailedHealth(w http.ResponseWriter, r *http.Request) {
 	report := s.healthSvc.CheckHealth(r.Context())
 
@@ -96,9 +120,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateJobRequest struct {
-	Command string            `json:"command"`
-	Image   string            `json:"image"`
-	Env     map[string]string `json:"env"`
+	Command  string            `json:"command"`
+	Image    string            `json:"image"`
+	Env      map[string]string `json:"env"`
+	Priority int               `json:"priority"` // 0-10, higher = more priority
 }
 
 func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
@@ -145,14 +170,21 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate priority (0-10)
+	if req.Priority < 0 || req.Priority > 10 {
+		http.Error(w, `{"error": "Validation failed", "details": "priority must be between 0 and 10"}`, http.StatusBadRequest)
+		return
+	}
+
 	// Create Agent Job definition
 	configBytes, _ := json.Marshal(map[string]interface{}{
 		"image":       req.Image,
 		"commands":    []string{req.Command},
 		"environment": req.Env,
+		"priority":    req.Priority,
 	})
 
-	job, err := s.jobService.CreateJob(r.Context(), req.Image, configBytes)
+	job, err := s.jobService.CreateJob(r.Context(), req.Image, configBytes, req.Priority)
 	if err != nil {
 		http.Error(w, `{"error": "Failed to create job", "details": "`+err.Error()+`"}`, http.StatusInternalServerError)
 		return
@@ -184,7 +216,15 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result, err := s.jobService.ListJobs(r.Context(), offset, limit)
+	agentID, _ := strconv.ParseInt(r.URL.Query().Get("agent_id"), 10, 64)
+
+	var result *services.PaginatedJobs
+	var err error
+	if agentID > 0 {
+		result, err = s.jobService.ListJobsByAgent(r.Context(), agentID, offset, limit)
+	} else {
+		result, err = s.jobService.ListJobs(r.Context(), offset, limit)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -213,12 +253,30 @@ func (s *Server) handleGetJobLogs(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(job.Logs))
 }
 
+type AgentResponse struct {
+	*domain.Agent
+	ActiveJobCount int64 `json:"active_job_count"`
+}
+
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	// Get active agents from memory (60 second timeout)
 	agents := s.grpcServer.GetActiveAgents(60 * time.Second)
 
+	var response []*AgentResponse
+	for _, agent := range agents {
+		count, err := s.jobService.GetActiveJobCount(r.Context(), agent.ID)
+		if err != nil {
+			// Log error but continue
+			count = 0
+		}
+		response = append(response, &AgentResponse{
+			Agent:          agent,
+			ActiveJobCount: count,
+		})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(agents)
+	json.NewEncoder(w).Encode(response)
 }
 
 func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {

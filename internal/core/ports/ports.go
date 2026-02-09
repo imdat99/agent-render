@@ -11,7 +11,10 @@ type JobRepository interface {
 	GetJob(ctx context.Context, id string) (*domain.Job, error)
 	Update(ctx context.Context, job *domain.Job) error
 	ListJobs(ctx context.Context, offset, limit int) ([]*domain.Job, error)
+	ListJobsByAgent(ctx context.Context, agentID int64, offset, limit int) ([]*domain.Job, error)
 	CountJobs(ctx context.Context) (int64, error)
+	CountJobsByAgent(ctx context.Context, agentID int64) (int64, error)
+	CountActiveJobsByAgent(ctx context.Context, agentID int64) (int64, error)
 }
 
 type AgentRepository interface {
@@ -28,5 +31,11 @@ type JobQueue interface {
 
 type LogPubSub interface {
 	Publish(ctx context.Context, jobID string, logLine string, progress float64) error
+	PublishResource(ctx context.Context, agentID int64, data []byte) error
+	PublishCancel(ctx context.Context, agentID int64, jobID string) error
+	PublishJobUpdate(ctx context.Context, jobID string, status string) error
 	Subscribe(ctx context.Context, jobID string) (<-chan domain.LogEntry, error)
+	SubscribeResources(ctx context.Context) (<-chan domain.SystemResource, error)
+	SubscribeCancel(ctx context.Context, agentID int64) (<-chan string, error)
+	SubscribeJobUpdates(ctx context.Context) (<-chan string, error)
 }

@@ -111,10 +111,69 @@ func (h *Hub) LogConsumer(ctx context.Context) {
 				return
 			}
 			// Broadcast log entry to all connected WebSocket clients
-			h.Broadcast(Message{
+			h.broadcast <- Message{
 				Type:    "log",
 				Payload: entry,
-			})
+			}
+		}
+	}
+}
+
+// ResourceConsumer consumes system resources from the PubSub port and broadcasts them
+func (h *Hub) ResourceConsumer(ctx context.Context) {
+	resCh, err := h.pubsub.SubscribeResources(ctx)
+	if err != nil {
+		log.Printf("Failed to subscribe to resources: %v", err)
+		return
+	}
+
+	log.Println("ResourceConsumer started, listening for resources...")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case entry, ok := <-resCh:
+			if !ok {
+				return
+			}
+			h.broadcast <- Message{
+				Type:    "resource_update",
+				Payload: entry,
+			}
+		}
+	}
+}
+
+// JobUpdateConsumer consumes job updates from the PubSub port and broadcasts them
+func (h *Hub) JobUpdateConsumer(ctx context.Context) {
+	updateCh, err := h.pubsub.SubscribeJobUpdates(ctx)
+	if err != nil {
+		log.Printf("Failed to subscribe to job updates: %v", err)
+		return
+	}
+
+	log.Println("JobUpdateConsumer started, listening for job updates...")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-updateCh:
+			if !ok {
+				return
+			}
+
+			var payload map[string]interface{}
+			if err := json.Unmarshal([]byte(msg), &payload); err != nil {
+				log.Printf("Failed to parse job update payload: %v", err)
+				continue
+			}
+
+			h.broadcast <- Message{
+				Type:    "job_update",
+				Payload: payload,
+			}
 		}
 	}
 }

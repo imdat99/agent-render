@@ -45,6 +45,8 @@ const (
 	Woodpecker_RegisterAgent_FullMethodName   = "/proto.Woodpecker/RegisterAgent"
 	Woodpecker_UnregisterAgent_FullMethodName = "/proto.Woodpecker/UnregisterAgent"
 	Woodpecker_ReportHealth_FullMethodName    = "/proto.Woodpecker/ReportHealth"
+	Woodpecker_StreamJobs_FullMethodName      = "/proto.Woodpecker/StreamJobs"
+	Woodpecker_SubmitStatus_FullMethodName    = "/proto.Woodpecker/SubmitStatus"
 )
 
 // WoodpeckerClient is the client API for Woodpecker service.
@@ -64,6 +66,9 @@ type WoodpeckerClient interface {
 	RegisterAgent(ctx context.Context, in *RegisterAgentRequest, opts ...grpc.CallOption) (*RegisterAgentResponse, error)
 	UnregisterAgent(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
 	ReportHealth(ctx context.Context, in *ReportHealthRequest, opts ...grpc.CallOption) (*Empty, error)
+	// New Streaming RPCs
+	StreamJobs(ctx context.Context, in *StreamOptions, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Workflow], error)
+	SubmitStatus(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[StatusUpdate, Empty], error)
 }
 
 type woodpeckerClient struct {
@@ -184,6 +189,38 @@ func (c *woodpeckerClient) ReportHealth(ctx context.Context, in *ReportHealthReq
 	return out, nil
 }
 
+func (c *woodpeckerClient) StreamJobs(ctx context.Context, in *StreamOptions, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Workflow], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Woodpecker_ServiceDesc.Streams[0], Woodpecker_StreamJobs_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[StreamOptions, Workflow]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Woodpecker_StreamJobsClient = grpc.ServerStreamingClient[Workflow]
+
+func (c *woodpeckerClient) SubmitStatus(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[StatusUpdate, Empty], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Woodpecker_ServiceDesc.Streams[1], Woodpecker_SubmitStatus_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[StatusUpdate, Empty]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Woodpecker_SubmitStatusClient = grpc.ClientStreamingClient[StatusUpdate, Empty]
+
 // WoodpeckerServer is the server API for Woodpecker service.
 // All implementations must embed UnimplementedWoodpeckerServer
 // for forward compatibility.
@@ -201,6 +238,9 @@ type WoodpeckerServer interface {
 	RegisterAgent(context.Context, *RegisterAgentRequest) (*RegisterAgentResponse, error)
 	UnregisterAgent(context.Context, *Empty) (*Empty, error)
 	ReportHealth(context.Context, *ReportHealthRequest) (*Empty, error)
+	// New Streaming RPCs
+	StreamJobs(*StreamOptions, grpc.ServerStreamingServer[Workflow]) error
+	SubmitStatus(grpc.ClientStreamingServer[StatusUpdate, Empty]) error
 	mustEmbedUnimplementedWoodpeckerServer()
 }
 
@@ -243,6 +283,12 @@ func (UnimplementedWoodpeckerServer) UnregisterAgent(context.Context, *Empty) (*
 }
 func (UnimplementedWoodpeckerServer) ReportHealth(context.Context, *ReportHealthRequest) (*Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportHealth not implemented")
+}
+func (UnimplementedWoodpeckerServer) StreamJobs(*StreamOptions, grpc.ServerStreamingServer[Workflow]) error {
+	return status.Error(codes.Unimplemented, "method StreamJobs not implemented")
+}
+func (UnimplementedWoodpeckerServer) SubmitStatus(grpc.ClientStreamingServer[StatusUpdate, Empty]) error {
+	return status.Error(codes.Unimplemented, "method SubmitStatus not implemented")
 }
 func (UnimplementedWoodpeckerServer) mustEmbedUnimplementedWoodpeckerServer() {}
 func (UnimplementedWoodpeckerServer) testEmbeddedByValue()                    {}
@@ -463,6 +509,24 @@ func _Woodpecker_ReportHealth_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Woodpecker_StreamJobs_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(StreamOptions)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(WoodpeckerServer).StreamJobs(m, &grpc.GenericServerStream[StreamOptions, Workflow]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Woodpecker_StreamJobsServer = grpc.ServerStreamingServer[Workflow]
+
+func _Woodpecker_SubmitStatus_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(WoodpeckerServer).SubmitStatus(&grpc.GenericServerStream[StatusUpdate, Empty]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Woodpecker_SubmitStatusServer = grpc.ClientStreamingServer[StatusUpdate, Empty]
+
 // Woodpecker_ServiceDesc is the grpc.ServiceDesc for Woodpecker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -515,7 +579,18 @@ var Woodpecker_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Woodpecker_ReportHealth_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "StreamJobs",
+			Handler:       _Woodpecker_StreamJobs_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "SubmitStatus",
+			Handler:       _Woodpecker_SubmitStatus_Handler,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "proto/woodpecker.proto",
 }
 

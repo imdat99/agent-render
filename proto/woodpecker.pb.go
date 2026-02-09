@@ -321,6 +321,7 @@ type Workflow struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Timeout       int64                  `protobuf:"varint,2,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	Payload       []byte                 `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
+	Cancel        bool                   `protobuf:"varint,4,opt,name=cancel,proto3" json:"cancel,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -374,6 +375,13 @@ func (x *Workflow) GetPayload() []byte {
 		return x.Payload
 	}
 	return nil
+}
+
+func (x *Workflow) GetCancel() bool {
+	if x != nil {
+		return x.Cancel
+	}
+	return false
 }
 
 type NextRequest struct {
@@ -1204,6 +1212,118 @@ func (x *AuthResponse) GetAccessToken() string {
 	return ""
 }
 
+type StreamOptions struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Filter        *Filter                `protobuf:"bytes,1,opt,name=filter,proto3" json:"filter,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StreamOptions) Reset() {
+	*x = StreamOptions{}
+	mi := &file_proto_woodpecker_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StreamOptions) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StreamOptions) ProtoMessage() {}
+
+func (x *StreamOptions) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_woodpecker_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StreamOptions.ProtoReflect.Descriptor instead.
+func (*StreamOptions) Descriptor() ([]byte, []int) {
+	return file_proto_woodpecker_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *StreamOptions) GetFilter() *Filter {
+	if x != nil {
+		return x.Filter
+	}
+	return nil
+}
+
+type StatusUpdate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StepUuid      string                 `protobuf:"bytes,1,opt,name=step_uuid,json=stepUuid,proto3" json:"step_uuid,omitempty"`
+	Time          int64                  `protobuf:"varint,2,opt,name=time,proto3" json:"time,omitempty"`
+	Type          int32                  `protobuf:"varint,3,opt,name=type,proto3" json:"type,omitempty"` // 0=stdout, 1=stderr, 2=exit-code, 3=metadata, 4=progress, 5=system-resource
+	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StatusUpdate) Reset() {
+	*x = StatusUpdate{}
+	mi := &file_proto_woodpecker_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StatusUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StatusUpdate) ProtoMessage() {}
+
+func (x *StatusUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_woodpecker_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StatusUpdate.ProtoReflect.Descriptor instead.
+func (*StatusUpdate) Descriptor() ([]byte, []int) {
+	return file_proto_woodpecker_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *StatusUpdate) GetStepUuid() string {
+	if x != nil {
+		return x.StepUuid
+	}
+	return ""
+}
+
+func (x *StatusUpdate) GetTime() int64 {
+	if x != nil {
+		return x.Time
+	}
+	return 0
+}
+
+func (x *StatusUpdate) GetType() int32 {
+	if x != nil {
+		return x.Type
+	}
+	return 0
+}
+
+func (x *StatusUpdate) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
 var File_proto_woodpecker_proto protoreflect.FileDescriptor
 
 const file_proto_woodpecker_proto_rawDesc = "" +
@@ -1232,11 +1352,12 @@ const file_proto_woodpecker_proto_rawDesc = "" +
 	"\x06labels\x18\x01 \x03(\v2\x19.proto.Filter.LabelsEntryR\x06labels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"N\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"f\n" +
 	"\bWorkflow\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\atimeout\x18\x02 \x01(\x03R\atimeout\x12\x18\n" +
-	"\apayload\x18\x03 \x01(\fR\apayload\"4\n" +
+	"\apayload\x18\x03 \x01(\fR\apayload\x12\x16\n" +
+	"\x06cancel\x18\x04 \x01(\bR\x06cancel\"4\n" +
 	"\vNextRequest\x12%\n" +
 	"\x06filter\x18\x01 \x01(\v2\r.proto.FilterR\x06filter\"I\n" +
 	"\vInitRequest\x12\x0e\n" +
@@ -1287,7 +1408,14 @@ const file_proto_woodpecker_proto_rawDesc = "" +
 	"\fAuthResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x19\n" +
 	"\bagent_id\x18\x02 \x01(\x03R\aagentId\x12!\n" +
-	"\faccess_token\x18\x03 \x01(\tR\vaccessToken2\xc2\x04\n" +
+	"\faccess_token\x18\x03 \x01(\tR\vaccessToken\"6\n" +
+	"\rStreamOptions\x12%\n" +
+	"\x06filter\x18\x01 \x01(\v2\r.proto.FilterR\x06filter\"g\n" +
+	"\fStatusUpdate\x12\x1b\n" +
+	"\tstep_uuid\x18\x01 \x01(\tR\bstepUuid\x12\x12\n" +
+	"\x04time\x18\x02 \x01(\x03R\x04time\x12\x12\n" +
+	"\x04type\x18\x03 \x01(\x05R\x04type\x12\x12\n" +
+	"\x04data\x18\x04 \x01(\fR\x04data2\xb2\x05\n" +
 	"\n" +
 	"Woodpecker\x121\n" +
 	"\aVersion\x12\f.proto.Empty\x1a\x16.proto.VersionResponse\"\x00\x121\n" +
@@ -1300,7 +1428,10 @@ const file_proto_woodpecker_proto_rawDesc = "" +
 	"\x03Log\x12\x11.proto.LogRequest\x1a\f.proto.Empty\"\x00\x12L\n" +
 	"\rRegisterAgent\x12\x1b.proto.RegisterAgentRequest\x1a\x1c.proto.RegisterAgentResponse\"\x00\x12/\n" +
 	"\x0fUnregisterAgent\x12\f.proto.Empty\x1a\f.proto.Empty\"\x00\x12:\n" +
-	"\fReportHealth\x12\x1a.proto.ReportHealthRequest\x1a\f.proto.Empty\"\x002C\n" +
+	"\fReportHealth\x12\x1a.proto.ReportHealthRequest\x1a\f.proto.Empty\"\x00\x127\n" +
+	"\n" +
+	"StreamJobs\x12\x14.proto.StreamOptions\x1a\x0f.proto.Workflow\"\x000\x01\x125\n" +
+	"\fSubmitStatus\x12\x13.proto.StatusUpdate\x1a\f.proto.Empty\"\x00(\x012C\n" +
 	"\x0eWoodpeckerAuth\x121\n" +
 	"\x04Auth\x12\x12.proto.AuthRequest\x1a\x13.proto.AuthResponse\"\x00B.Z,go.woodpecker-ci.org/woodpecker/v3/rpc/protob\x06proto3"
 
@@ -1316,7 +1447,7 @@ func file_proto_woodpecker_proto_rawDescGZIP() []byte {
 	return file_proto_woodpecker_proto_rawDescData
 }
 
-var file_proto_woodpecker_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_proto_woodpecker_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_proto_woodpecker_proto_goTypes = []any{
 	(*StepState)(nil),             // 0: proto.StepState
 	(*WorkflowState)(nil),         // 1: proto.WorkflowState
@@ -1340,48 +1471,55 @@ var file_proto_woodpecker_proto_goTypes = []any{
 	(*WaitResponse)(nil),          // 19: proto.WaitResponse
 	(*AuthRequest)(nil),           // 20: proto.AuthRequest
 	(*AuthResponse)(nil),          // 21: proto.AuthResponse
-	nil,                           // 22: proto.Filter.LabelsEntry
-	nil,                           // 23: proto.AgentInfo.CustomLabelsEntry
+	(*StreamOptions)(nil),         // 22: proto.StreamOptions
+	(*StatusUpdate)(nil),          // 23: proto.StatusUpdate
+	nil,                           // 24: proto.Filter.LabelsEntry
+	nil,                           // 25: proto.AgentInfo.CustomLabelsEntry
 }
 var file_proto_woodpecker_proto_depIdxs = []int32{
-	22, // 0: proto.Filter.labels:type_name -> proto.Filter.LabelsEntry
+	24, // 0: proto.Filter.labels:type_name -> proto.Filter.LabelsEntry
 	3,  // 1: proto.NextRequest.filter:type_name -> proto.Filter
 	1,  // 2: proto.InitRequest.state:type_name -> proto.WorkflowState
 	1,  // 3: proto.DoneRequest.state:type_name -> proto.WorkflowState
 	0,  // 4: proto.UpdateRequest.state:type_name -> proto.StepState
 	2,  // 5: proto.LogRequest.logEntries:type_name -> proto.LogEntry
-	23, // 6: proto.AgentInfo.customLabels:type_name -> proto.AgentInfo.CustomLabelsEntry
+	25, // 6: proto.AgentInfo.customLabels:type_name -> proto.AgentInfo.CustomLabelsEntry
 	14, // 7: proto.RegisterAgentRequest.info:type_name -> proto.AgentInfo
 	4,  // 8: proto.NextResponse.workflow:type_name -> proto.Workflow
-	12, // 9: proto.Woodpecker.Version:input_type -> proto.Empty
-	5,  // 10: proto.Woodpecker.Next:input_type -> proto.NextRequest
-	6,  // 11: proto.Woodpecker.Init:input_type -> proto.InitRequest
-	7,  // 12: proto.Woodpecker.Wait:input_type -> proto.WaitRequest
-	8,  // 13: proto.Woodpecker.Done:input_type -> proto.DoneRequest
-	9,  // 14: proto.Woodpecker.Extend:input_type -> proto.ExtendRequest
-	10, // 15: proto.Woodpecker.Update:input_type -> proto.UpdateRequest
-	11, // 16: proto.Woodpecker.Log:input_type -> proto.LogRequest
-	15, // 17: proto.Woodpecker.RegisterAgent:input_type -> proto.RegisterAgentRequest
-	12, // 18: proto.Woodpecker.UnregisterAgent:input_type -> proto.Empty
-	13, // 19: proto.Woodpecker.ReportHealth:input_type -> proto.ReportHealthRequest
-	20, // 20: proto.WoodpeckerAuth.Auth:input_type -> proto.AuthRequest
-	16, // 21: proto.Woodpecker.Version:output_type -> proto.VersionResponse
-	17, // 22: proto.Woodpecker.Next:output_type -> proto.NextResponse
-	12, // 23: proto.Woodpecker.Init:output_type -> proto.Empty
-	19, // 24: proto.Woodpecker.Wait:output_type -> proto.WaitResponse
-	12, // 25: proto.Woodpecker.Done:output_type -> proto.Empty
-	12, // 26: proto.Woodpecker.Extend:output_type -> proto.Empty
-	12, // 27: proto.Woodpecker.Update:output_type -> proto.Empty
-	12, // 28: proto.Woodpecker.Log:output_type -> proto.Empty
-	18, // 29: proto.Woodpecker.RegisterAgent:output_type -> proto.RegisterAgentResponse
-	12, // 30: proto.Woodpecker.UnregisterAgent:output_type -> proto.Empty
-	12, // 31: proto.Woodpecker.ReportHealth:output_type -> proto.Empty
-	21, // 32: proto.WoodpeckerAuth.Auth:output_type -> proto.AuthResponse
-	21, // [21:33] is the sub-list for method output_type
-	9,  // [9:21] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	3,  // 9: proto.StreamOptions.filter:type_name -> proto.Filter
+	12, // 10: proto.Woodpecker.Version:input_type -> proto.Empty
+	5,  // 11: proto.Woodpecker.Next:input_type -> proto.NextRequest
+	6,  // 12: proto.Woodpecker.Init:input_type -> proto.InitRequest
+	7,  // 13: proto.Woodpecker.Wait:input_type -> proto.WaitRequest
+	8,  // 14: proto.Woodpecker.Done:input_type -> proto.DoneRequest
+	9,  // 15: proto.Woodpecker.Extend:input_type -> proto.ExtendRequest
+	10, // 16: proto.Woodpecker.Update:input_type -> proto.UpdateRequest
+	11, // 17: proto.Woodpecker.Log:input_type -> proto.LogRequest
+	15, // 18: proto.Woodpecker.RegisterAgent:input_type -> proto.RegisterAgentRequest
+	12, // 19: proto.Woodpecker.UnregisterAgent:input_type -> proto.Empty
+	13, // 20: proto.Woodpecker.ReportHealth:input_type -> proto.ReportHealthRequest
+	22, // 21: proto.Woodpecker.StreamJobs:input_type -> proto.StreamOptions
+	23, // 22: proto.Woodpecker.SubmitStatus:input_type -> proto.StatusUpdate
+	20, // 23: proto.WoodpeckerAuth.Auth:input_type -> proto.AuthRequest
+	16, // 24: proto.Woodpecker.Version:output_type -> proto.VersionResponse
+	17, // 25: proto.Woodpecker.Next:output_type -> proto.NextResponse
+	12, // 26: proto.Woodpecker.Init:output_type -> proto.Empty
+	19, // 27: proto.Woodpecker.Wait:output_type -> proto.WaitResponse
+	12, // 28: proto.Woodpecker.Done:output_type -> proto.Empty
+	12, // 29: proto.Woodpecker.Extend:output_type -> proto.Empty
+	12, // 30: proto.Woodpecker.Update:output_type -> proto.Empty
+	12, // 31: proto.Woodpecker.Log:output_type -> proto.Empty
+	18, // 32: proto.Woodpecker.RegisterAgent:output_type -> proto.RegisterAgentResponse
+	12, // 33: proto.Woodpecker.UnregisterAgent:output_type -> proto.Empty
+	12, // 34: proto.Woodpecker.ReportHealth:output_type -> proto.Empty
+	4,  // 35: proto.Woodpecker.StreamJobs:output_type -> proto.Workflow
+	12, // 36: proto.Woodpecker.SubmitStatus:output_type -> proto.Empty
+	21, // 37: proto.WoodpeckerAuth.Auth:output_type -> proto.AuthResponse
+	24, // [24:38] is the sub-list for method output_type
+	10, // [10:24] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_proto_woodpecker_proto_init() }
@@ -1395,7 +1533,7 @@ func file_proto_woodpecker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_woodpecker_proto_rawDesc), len(file_proto_woodpecker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
