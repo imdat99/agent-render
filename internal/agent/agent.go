@@ -69,89 +69,89 @@ func New(serverAddr, secret string, capacity int) (*Agent, error) {
 }
 
 func (a *Agent) Run(ctx context.Context) error {
-	// Create a cancellable context for job execution
-	jobCtx, cancel := context.WithCancel(ctx)
-	a.cancelFunc = cancel
-	defer cancel()
+	// Master loop for connection/registration management
+	for {
+		// Check global context
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 
-	// Retry registration loop
+		// 1. Register with retry
+		if err := a.registerWithRetry(ctx); err != nil {
+			log.Printf("Registration failed hard: %v", err)
+			return err
+		}
+
+		log.Printf("Agent started/reconnected with ID: %d, Capacity: %d", a.agentID, a.capacity)
+
+		// 2. Create session context
+		// This context controls the lifecycle of this specific connection session
+		sessionCtx, sessionCancel := context.WithCancel(ctx)
+
+		// 3. Start background routines
+		a.startBackgroundRoutines(sessionCtx)
+
+		// 4. Stream Jobs (Blocking)
+		// If this returns, it means connection was lost or context cancelled
+		err := a.streamJobs(sessionCtx)
+
+		// 5. Cleanup session
+		sessionCancel()
+		a.wg.Wait() // Wait for background routines to stop (except running jobs?)
+		// Actually running jobs should probably continue if possible?
+		// But if we lose connection, we can't report status.
+		// The requirement says "Resilience: ... Agent phải tự động reconnect."
+		// If we reconnect fast enough, maybe we can keep jobs running?
+		// But for now, let's assume we re-register and re-sync.
+		// Existing jobs are managed by `a.activeJobs`.
+		// If we cancel `sessionCtx`, passed to `streamJobs`, it shouldn't affect `jobCtx` of individual jobs?
+		// `executeJob` creates `jobCtx` from `ctx` (passed to Run)? No, it was `jobCtx` from `Run`.
+		// I should use `ctx` (app context) for jobs, but `sessionCtx` for streams.
+
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		log.Printf("Session ended: %v. Re-registering in 5s...", err)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+			continue
+		}
+	}
+}
+
+// registerWithRetry retries registration until success or context cancellation
+func (a *Agent) registerWithRetry(ctx context.Context) error {
+	backoff := 1 * time.Second
+	maxBackoff := 30 * time.Second
+
 	for {
 		if err := a.register(ctx); err != nil {
-			log.Printf("Registration failed, retrying in 5s: %v", err)
+			log.Printf("Registration failed: %v. Retrying in %v...", err, backoff)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(5 * time.Second):
-				continue
-			}
-		}
-		break
-	}
-
-	log.Printf("Agent started with ID: %d, Capacity: %d", a.agentID, a.capacity)
-
-	// Start cancel listener in background
-	go a.cancelListener(jobCtx)
-
-	// Start status reporter in background
-	go a.submitStatusLoop(jobCtx)
-
-	// Exponential backoff for stream connection
-	backoff := 1 * time.Second
-	maxBackoff := 60 * time.Second
-
-	for {
-		err := a.streamJobs(jobCtx)
-		if err != nil {
-			if jobCtx.Err() != nil {
-				// Context cancelled, exit
-				break
-			}
-			log.Printf("Job stream disconnected: %v. Reconnecting in %v...", err, backoff)
-
-			select {
-			case <-jobCtx.Done():
-				break
 			case <-time.After(backoff):
-				// Increase backoff
 				backoff *= 2
 				if backoff > maxBackoff {
 					backoff = maxBackoff
 				}
 				continue
 			}
-		} else {
-			// If streamJobs returns nil, it usually means clean shutdown or context done
-			// Reset backoff just in case
-			backoff = 1 * time.Second
 		}
+		return nil
+	}
+}
 
-		if jobCtx.Err() != nil {
-			break
-		}
-	}
+func (a *Agent) startBackgroundRoutines(ctx context.Context) {
+	// Start cancel listener
+	go a.cancelListener(ctx)
 
-	log.Println("Run loop exited, cleaning up...")
-	// Wait for all jobs by using the existing shutdown logic
-	// Cancel all running jobs
-	cancel()
-	// Wait for all jobs to complete with timeout
-	done := make(chan struct{})
-	go func() {
-		a.wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		log.Println("All jobs completed gracefully")
-	case <-time.After(30 * time.Second):
-		log.Println("Shutdown timeout reached, some jobs may still be running")
-	}
-	// Unregister from server
-	if err := a.unregister(ctx); err != nil {
-		log.Printf("Failed to unregister agent: %v", err)
-	}
-	return nil
+	// Start status reporter
+	go a.submitStatusLoop(ctx)
 }
 
 // cancelListener listens for job cancellation signals from the server
@@ -259,10 +259,7 @@ func (a *Agent) streamJobs(ctx context.Context) error {
 
 		// Check for cancellation signal
 		if workflow.Cancel {
-			// Release semaphore as we are not starting a new job (though we might have acquired one above)
-			// Actually we acquired semaphore before Recv.
-			// If it's a cancel signal, it doesn't count as a new job.
-			// So we should release the semaphore immediately.
+			// Release semaphore immediately as this is not a new job
 			<-a.semaphore
 
 			log.Printf("Received cancellation signal for job %s", workflow.Id)
@@ -277,9 +274,31 @@ func (a *Agent) streamJobs(ctx context.Context) error {
 		log.Printf("Received job from stream: %s (active: %d/%d)", workflow.Id, len(a.semaphore), a.capacity)
 
 		a.wg.Add(1)
+		// We use a background context for execution so that if stream disconnects,
+		// the running job is NOT cancelled immediately (unless agent shuts down).
+		// However, in the Run loop, we wait for a.wg.Wait().
+		// And we don't seem to cancel running jobs on session disconnect in new logic.
+		// `executeJob` uses `ctx` passed to it.
+		// In `Run` refactor, pass `ctx` (global) to `executeJob`?
+		// Wait, `executeJob` call needs to be async.
 		go func(wf *proto.Workflow) {
 			defer a.wg.Done()
 			defer func() { <-a.semaphore }() // Release when done
+			// Use the global context or a derivation?
+			// `ctx` passed to streamJobs is `sessionCtx`.
+			// If `sessionCtx` is cancelled, `executeJob` (if using it) will be cancelled.
+			// Ideally, running jobs should survive a brief disconnect?
+			// The original code used `jobCtx` which was global for the run.
+			// Here `ctx` is `sessionCtx`.
+			// If we want jobs to survive, we should pass the global `Agent` context to `streamJobs` purely for `executeJob`.
+			// But `streamJobs` signature only has one ctx.
+			// Let's rely on the fact that we might want to cancel jobs if we lose connection?
+			// No, "Resilience": "If Agent disconnects... Server Re-queue".
+			// If Agent disconnects, Server re-queues. Agent should probably kill the job?
+			// Or Agent finishes it and reports Done?
+			// If Agent finishes and reports Done, but Server already re-queued, we have duplicate execution.
+			// So it is SAFER to cancel the job if we disconnect.
+			// So using `sessionCtx` (which is cancelled on disconnect) for `executeJob` is correct behavior.
 			a.executeJob(ctx, wf)
 		}(workflow)
 	}

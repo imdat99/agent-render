@@ -88,7 +88,8 @@ services:
       - AGENT_SECRET=mysecretkey
       - DOCKER_API_VERSION=1.44
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      # - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/docker.sock:/var/run/docker.sock
     networks:
       - picnic-net
     restart: always
