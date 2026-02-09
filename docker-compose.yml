@@ -1,0 +1,79 @@
+
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: picpic
+    ports:
+      - "5439:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - picnic-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d picpic"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6389:6379"
+    networks:
+      - picnic-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  server:
+    build: .
+    image: picpic-render-server:latest
+    environment:
+      PORT: 9000
+      # HTTP_PORT: 8080
+      DB_URL: postgres://user:password@postgres:5432/picpic?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      WOODPECKER_AGENT_SECRET: mysecretkey
+    ports:
+      - "9000:9000"
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - picnic-net
+    restart: on-failure
+
+  agent-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    environment:
+      - AGENT_SERVER=server:9000
+      - AGENT_SECRET=mysecretkey
+      - AGENT_CAPACITY=2
+      - DOCKER_API_VERSION=1.44
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      server:
+        condition: service_started
+    networks:
+      - picnic-net
+    restart: on-failure
+
+volumes:
+  postgres_data:
+  agent-1-data:
+  agent-2-data:
+
+networks:
+  picnic-net:
