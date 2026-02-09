@@ -152,6 +152,12 @@ func (s *Server) StreamJobs(req *proto.StreamOptions, stream proto.Woodpecker_St
 			log.Printf("Assigning job %s to agent %d (via stream)", job.ID, agentID)
 			s.trackJobAssignment(agentID, job.ID)
 
+			// Update AgentID in DB
+			if err := s.jobService.AssignJob(ctx, job.ID, agentID); err != nil {
+				log.Printf("Failed to assign job %s to agent %d: %v", job.ID, agentID, err)
+				continue
+			}
+
 			// Parse config
 			var config map[string]interface{}
 			if err := json.Unmarshal([]byte(job.Config), &config); err != nil {

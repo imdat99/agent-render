@@ -310,6 +310,32 @@ func (s *JobService) UpdateJobStatus(ctx context.Context, jobID string, status d
 	return nil
 }
 
+func (s *JobService) AssignJob(ctx context.Context, jobID string, agentID int64) error {
+	job, err := s.jobRepo.GetJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+
+	job.AgentID = agentID
+	job.Status = domain.JobStatusRunning // Or submitted? Usually running when assigned or about to run.
+	// Actually "submitted" means sent to agent? "running" means agent started it.
+	// But let's set it to running for simplicity or "submitted".
+	// The problem description says "NODE: Unassigned".
+	// If we set AgentID, UI should show it.
+	job.UpdatedAt = time.Now()
+
+	if err := s.jobRepo.Update(ctx, job); err != nil {
+		return err
+	}
+
+	// Publish update so UI sees the assignment immediately
+	if err := s.pubsub.PublishJobUpdate(ctx, jobID, string(job.Status)); err != nil {
+		log.Printf("Failed to publish job update: %v", err)
+	}
+
+	return nil
+}
+
 func (s *JobService) CancelJob(ctx context.Context, jobID string) error {
 	job, err := s.jobRepo.GetJob(ctx, jobID)
 	if err != nil {

@@ -34,6 +34,10 @@ export function connectWS() {
         state.mqtt.subscribe('picpic/logs/#', (err) => {
             if (err) console.error('MQTT subscribe error (logs)', err);
         });
+        // Subscribe to job updates
+        state.mqtt.subscribe('picpic/job/+', (err) => {
+            if (err) console.error('MQTT subscribe error (jobs)', err);
+        });
 
         // Connected visuals
         statusText.textContent = "MQTT Live";
@@ -70,6 +74,11 @@ export function connectWS() {
             if (topic.startsWith('picpic/logs/')) {
                 // Log entries are published directly as JSON in the logs topic
                 window.dispatchEvent(new CustomEvent('ws:log', { detail: msg }));
+            } else if (topic.startsWith('picpic/job/')) {
+                // Job specific update
+                if (msg.type === 'job_update') {
+                    window.dispatchEvent(new CustomEvent('ws:job-update', { detail: msg }));
+                }
             } else if (topic === 'picpic/events') {
                 // Events follow {type: ..., payload: ...} format
                 handleWSMessage(msg);
@@ -81,7 +90,7 @@ export function connectWS() {
 }
 
 function handleWSMessage(msg) {
-    if (msg.type === 'job_update' || msg.type === 'job_created' || msg.type === 'job_cancelled' || msg.type === 'job_retried') {
+    if (msg.type === 'job_created' || msg.type === 'job_cancelled' || msg.type === 'job_retried') {
         window.dispatchEvent(new CustomEvent('ws:job-update', { detail: msg }));
     }
     else if (msg.type === 'agent_update') {

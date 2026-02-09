@@ -99,14 +99,20 @@ func (p *Publisher) consumeJobUpdates(ctx context.Context) {
 				continue
 			}
 
+			jobID, ok := innerPayload["job_id"].(string)
+			if !ok || jobID == "" {
+				log.Printf("Job update missing job_id: %v", innerPayload)
+				continue
+			}
+
 			event := map[string]interface{}{
 				"type":    "job_update",
 				"payload": innerPayload,
 			}
 			data, _ := json.Marshal(event)
 
-			// Publish to global events topic
-			topic := fmt.Sprintf("%s/events", p.prefix)
+			// Publish to job specific topic
+			topic := fmt.Sprintf("%s/job/%s", p.prefix, jobID)
 			p.client.Publish(topic, 0, false, data)
 		}
 	}
