@@ -97,10 +97,11 @@ func (d *DockerExecutor) Run(ctx context.Context, imageName string, commands []s
 	cmd := []string{"/bin/sh", "-c", script}
 
 	resp, err := d.cli.ContainerCreate(ctx, &container.Config{
-		Image: imageName,
-		Cmd:   cmd,
-		Env:   envSlice,
-		Tty:   true, // Merge stdout/stderr for simpler log streaming
+		Image:      imageName,
+		Entrypoint: cmd, // Override image's ENTRYPOINT (e.g., ffmpeg) to run shell
+		Cmd:        nil, // Clear CMD as we use Entrypoint
+		Env:        envSlice,
+		Tty:        true, // Merge stdout/stderr for simpler log streaming
 	}, nil, nil, nil, "")
 	if err != nil {
 		return fmt.Errorf("failed to create container: %w", err)
