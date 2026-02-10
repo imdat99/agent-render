@@ -164,11 +164,17 @@ func (a *Agent) cancelListener(ctx context.Context) {
 
 func (a *Agent) register(ctx context.Context) error {
 	// 1. Authenticate
-	// Load persisted ID if available
-	savedID, _ := a.loadAgentID()
-	if savedID > 0 {
-		log.Printf("Loaded persisted Agent ID: %d", savedID)
-		a.agentID = savedID
+	// Load persisted ID if available (unless forced new)
+	var savedID int64
+	if os.Getenv("FORCE_NEW_ID") != "true" {
+		var err error
+		savedID, err = a.loadAgentID()
+		if err == nil && savedID > 0 {
+			log.Printf("Loaded persisted Agent ID: %d", savedID)
+			a.agentID = savedID
+		}
+	} else {
+		log.Println("Forcing new Agent ID due to FORCE_NEW_ID=true")
 	}
 
 	authResp, err := a.authClient.Auth(ctx, &proto.AuthRequest{
@@ -653,17 +659,49 @@ func (a *Agent) unregister(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to unregister agent: %w", err)
 	}
-	log.Printf("Agent %d unregistered successfully", a.agentID)
 	return nil
 }
 
-const AgentIDFile = "/data/agent_id"
+const (
+	AgentIDFile  = "/data/agent_id"
+	HostnameFile = "/host_hostname"
+)
+
+type AgentIdentity struct {
+	ID          int64  `json:"id"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+func (a *Agent) getHostFingerprint() string {
+	// Try to read mounted host hostname
+	data, err := os.ReadFile(HostnameFile)
+	if err == nil {
+		return strings.TrimSpace(string(data))
+	}
+	// Fallback to container hostname if mount missing (not recommended for snapshots)
+	hostname, _ := os.Hostname()
+	return hostname
+}
 
 func (a *Agent) loadAgentID() (int64, error) {
 	data, err := os.ReadFile(AgentIDFile)
 	if err != nil {
 		return 0, err
 	}
+
+	// Try parsing as JSON first (new format)
+	var identity AgentIdentity
+	if err := json.Unmarshal(data, &identity); err == nil {
+		// Verify fingerprint
+		currentFP := a.getHostFingerprint()
+		if identity.Fingerprint != "" && identity.Fingerprint != currentFP {
+			log.Printf("Environment changed (Hostname mismatch: saved=%s, current=%s). Resetting Agent ID.", identity.Fingerprint, currentFP)
+			return 0, fmt.Errorf("environment changed")
+		}
+		return identity.ID, nil
+	}
+
+	// Fallback: Parse as simple int64 (legacy/migration)
 	id, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
 	if err != nil {
 		return 0, err
@@ -672,14 +710,19 @@ func (a *Agent) loadAgentID() (int64, error) {
 }
 
 func (a *Agent) saveAgentID(id int64) error {
-	// Ensure directory exists
-	// But since we mount /data, it should exist.
-	// If not mounted, it might fail if /data doesn't exist?
-	// /bin/agent is root, so /data might need creation if not volume mounted?
-	// But our Dockerfile doesn't create /data. Volume mount creates it.
-	// Safe to assume /data exists or mkdir?
 	if err := os.MkdirAll("/data", 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(AgentIDFile, []byte(fmt.Sprintf("%d", id)), 0644)
+
+	identity := AgentIdentity{
+		ID:          id,
+		Fingerprint: a.getHostFingerprint(),
+	}
+
+	data, err := json.Marshal(identity)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(AgentIDFile, data, 0644)
 }
