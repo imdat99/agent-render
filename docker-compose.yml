@@ -93,7 +93,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # - /tmp/docker.sock:/var/run/docker.sock
       - agent-1-data:/data
-      - /etc/hostname:/host_hostname:ro
+      - /proc/sys/kernel/hostname:/host_hostname:ro
     networks:
       - picnic-net
     restart: always
