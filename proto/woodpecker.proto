@@ -165,6 +165,7 @@ service WoodpeckerAuth {
 message AuthRequest {
   string agent_token = 1;
   int64  agent_id    = 2;
+  string hostname    = 3;
 }
 
 message AuthResponse {

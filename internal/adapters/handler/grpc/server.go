@@ -509,13 +509,31 @@ func (s *Server) Auth(ctx context.Context, req *proto.AuthRequest) (*proto.AuthR
 		}
 	}
 
-	// 2. If no valid agent found, create a new one
+	// 2. If no valid agent found by ID, try by Hostname
+	if agent == nil && req.Hostname != "" {
+		log.Printf("Looking up agent by Hostname: %s", req.Hostname)
+		existing, err := s.jobService.GetAgentByName(ctx, req.Hostname)
+		if err == nil && existing != nil {
+			log.Printf("Found existing Agent by Hostname: %s -> ID: %d", req.Hostname, existing.ID)
+			agent = existing
+			// Update heartbeat immediately
+			_ = s.jobService.UpdateAgentHeartbeat(ctx, agent.ID)
+		}
+	}
+
+	// 3. If no valid agent found, create a new one
 	if agent == nil {
 		agent, err = s.jobService.CreatePlaceholderAgent(ctx)
 		if err != nil {
 			log.Printf("Failed to create agent: %v", err)
 			return nil, status.Error(codes.Internal, "failed to create agent session")
 		}
+
+		// Set name if hostname provided
+		if req.Hostname != "" {
+			_, _ = s.jobService.UpdateAgentInfo(ctx, agent.ID, req.Hostname, "", "", "", 0)
+		}
+
 		log.Printf("Created new Agent ID: %d", agent.ID)
 	}
 

@@ -1104,6 +1104,7 @@ type AuthRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentToken    string                 `protobuf:"bytes,1,opt,name=agent_token,json=agentToken,proto3" json:"agent_token,omitempty"`
 	AgentId       int64                  `protobuf:"varint,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	Hostname      string                 `protobuf:"bytes,3,opt,name=hostname,proto3" json:"hostname,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1150,6 +1151,13 @@ func (x *AuthRequest) GetAgentId() int64 {
 		return x.AgentId
 	}
 	return 0
+}
+
+func (x *AuthRequest) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
 }
 
 type AuthResponse struct {
@@ -1400,11 +1408,12 @@ const file_proto_woodpecker_proto_rawDesc = "" +
 	"\x15RegisterAgentResponse\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\x03R\aagentId\"*\n" +
 	"\fWaitResponse\x12\x1a\n" +
-	"\bcanceled\x18\x01 \x01(\bR\bcanceled\"I\n" +
+	"\bcanceled\x18\x01 \x01(\bR\bcanceled\"e\n" +
 	"\vAuthRequest\x12\x1f\n" +
 	"\vagent_token\x18\x01 \x01(\tR\n" +
 	"agentToken\x12\x19\n" +
-	"\bagent_id\x18\x02 \x01(\x03R\aagentId\"d\n" +
+	"\bagent_id\x18\x02 \x01(\x03R\aagentId\x12\x1a\n" +
+	"\bhostname\x18\x03 \x01(\tR\bhostname\"d\n" +
 	"\fAuthResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x19\n" +
 	"\bagent_id\x18\x02 \x01(\x03R\aagentId\x12!\n" +

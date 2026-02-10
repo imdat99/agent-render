@@ -180,6 +180,7 @@ func (a *Agent) register(ctx context.Context) error {
 	authResp, err := a.authClient.Auth(ctx, &proto.AuthRequest{
 		AgentToken: a.secret,
 		AgentId:    a.agentID,
+		Hostname:   a.getHostFingerprint(),
 	})
 	if err != nil {
 		return fmt.Errorf("auth failed: %w", err)
@@ -210,11 +211,7 @@ func (a *Agent) register(ctx context.Context) error {
 	mdCtx := metadata.AppendToOutgoingContext(ctx, "token", a.token)
 
 	// Get actual hostname instead of hardcoding
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Printf("Failed to get hostname: %v, using default", err)
-		hostname = "unknown-agent"
-	}
+	hostname := a.getHostFingerprint()
 
 	// 2. Register
 	_, err = a.client.RegisterAgent(mdCtx, &proto.RegisterAgentRequest{
