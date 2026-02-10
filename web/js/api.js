@@ -94,3 +94,39 @@ export async function cancelJob(jobId) {
         throw e;
     }
 }
+
+export async function restartAgent(agentId) {
+    try {
+        const res = await fetch(`${API_URL}/api/agents/${agentId}/restart`, {
+            method: 'POST'
+        });
+        if (res.ok) {
+            showToast('Agent Restart Sent', `ID: ${agentId}`, 'success');
+            return await res.json();
+        } else {
+            throw new Error(await res.text());
+        }
+    } catch (e) {
+        console.error("Restart Agent Error", e);
+        showToast('Failed to Restart', e.message, 'error');
+        throw e;
+    }
+}
+
+export async function updateAgent(agentId) {
+    try {
+        const res = await fetch(`${API_URL}/api/agents/${agentId}/update`, {
+            method: 'POST'
+        });
+        if (res.ok) {
+            showToast('Agent Update Sent', `ID: ${agentId}`, 'success');
+            return await res.json();
+        } else {
+            throw new Error(await res.text());
+        }
+    } catch (e) {
+        console.error("Update Agent Error", e);
+        showToast('Failed to Update', e.message, 'error');
+        throw e;
+    }
+}

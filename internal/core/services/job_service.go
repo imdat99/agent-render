@@ -142,15 +142,7 @@ func (s *JobService) UpdateAgentInfo(ctx context.Context, id int64, name, platfo
 }
 
 func (s *JobService) UpdateAgentHeartbeat(ctx context.Context, id int64) error {
-	agent, err := s.agentRepo.GetAgent(ctx, id)
-	if err != nil {
-		return err
-	}
-	if agent == nil {
-		return fmt.Errorf("agent not found")
-	}
-	agent.LastHeartbeat = time.Now()
-	return s.agentRepo.CreateOrUpdate(ctx, agent)
+	return s.agentRepo.UpdateHeartbeat(ctx, id)
 }
 
 func (s *JobService) ListAgents(ctx context.Context) ([]*domain.Agent, error) {

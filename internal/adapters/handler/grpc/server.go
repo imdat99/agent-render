@@ -106,8 +106,33 @@ func (s *Server) StreamJobs(req *proto.StreamOptions, stream proto.Woodpecker_St
 		// Better to continue log, but maybe retry?
 	}
 
+	// Get command channel
+	commandCh, _ := s.agentManager.GetCommandChannel(agentID)
+
 	for {
 		select {
+		case cmd := <-commandCh:
+			log.Printf("Sending command %s to agent %d", cmd, agentID)
+
+			// Job Payload with Action
+			jobPayload := map[string]interface{}{
+				"image":       "alpine", // Placeholder, agent should ignore for restart/update
+				"commands":    []string{"echo 'System Command'"},
+				"environment": map[string]string{},
+				"action":      cmd,
+			}
+			payloadBytes, _ := json.Marshal(jobPayload)
+
+			// Send to stream
+			err = stream.Send(&proto.Workflow{
+				Id:      fmt.Sprintf("cmd-%d-%d", agentID, time.Now().UnixNano()),
+				Timeout: 300,
+				Payload: payloadBytes,
+			})
+			if err != nil {
+				log.Printf("Failed to send command to agent %d: %v", agentID, err)
+			}
+
 		case jobID := <-cancelCh:
 			log.Printf("Received cancel signal for job %s directed to agent %d", jobID, agentID)
 			// Verify if agent is running this job
@@ -233,6 +258,16 @@ func (s *Server) SubmitStatus(stream proto.Woodpecker_SubmitStatusServer) error 
 			fmt.Sscanf(string(update.Data), "%f", &progress)
 			_ = s.jobService.UpdateJobProgress(ctx, update.StepUuid, progress)
 		case 5: // System Resources
+			// Parse data (JSON: {"cpu": 12.3, "ram": 45.6})
+			var stats struct {
+				CPU float64 `json:"cpu"`
+				RAM float64 `json:"ram"`
+			}
+			if err := json.Unmarshal(update.Data, &stats); err == nil {
+				// Update in-memory stats
+				s.agentManager.UpdateResources(agentID, stats.CPU, stats.RAM)
+			}
+
 			// Publish to PubSub for Dashboard
 			_ = s.jobService.PublishSystemResources(ctx, agentID, update.Data)
 		}
@@ -493,4 +528,9 @@ func (s *Server) Auth(ctx context.Context, req *proto.AuthRequest) (*proto.AuthR
 		AgentId:     agent.ID,
 		AccessToken: accessToken,
 	}, nil
+}
+
+// SendCommand sends a command to a specific agent
+func (s *Server) SendCommand(agentID int64, cmd string) bool {
+	return s.agentManager.SendCommand(agentID, cmd)
 }

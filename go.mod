@@ -69,5 +69,6 @@ require (
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409 // indirect
+	gorm.io/plugin/optimisticlock v1.1.3 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )

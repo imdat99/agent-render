@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/plugin/optimisticlock"
+)
 
 type AgentStatus string
 
@@ -11,16 +15,19 @@ const (
 )
 
 type Agent struct {
-	ID            int64       `json:"id" gorm:"primaryKey"`
-	Name          string      `json:"name"`
-	Platform      string      `json:"platform"`
-	Backend       string      `json:"backend"`
-	Version       string      `json:"version"`
-	Capacity      int32       `json:"capacity"`
-	Status        AgentStatus `json:"status" gorm:"-"` // Status is transient (Redis)
-	LastHeartbeat time.Time   `json:"last_heartbeat"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
+	ID            int64                  `json:"id" gorm:"primaryKey"`
+	Name          string                 `json:"name"`
+	Platform      string                 `json:"platform"`
+	Backend       string                 `json:"backend"`
+	Version       string                 `json:"version"`
+	LockVersion   optimisticlock.Version `json:"-"` // Optimistic Lock
+	Capacity      int32                  `json:"capacity"`
+	Status        AgentStatus            `json:"status" gorm:"-"` // Status is transient (Redis)
+	CPU           float64                `json:"cpu" gorm:"-"`
+	RAM           float64                `json:"ram" gorm:"-"`
+	LastHeartbeat time.Time              `json:"last_heartbeat"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
 func (Agent) TableName() string {

@@ -97,6 +97,14 @@ func (r *Repository) CreateOrUpdate(ctx context.Context, agent *domain.Agent) er
 	return r.db.WithContext(ctx).Save(agent).Error
 }
 
+func (r *Repository) UpdateHeartbeat(ctx context.Context, id int64) error {
+	return r.db.WithContext(ctx).Model(&domain.Agent{}).Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"last_heartbeat": gorm.Expr("NOW()"),
+			"updated_at":     gorm.Expr("NOW()"),
+		}).Error
+}
+
 func (r *Repository) GetAgent(ctx context.Context, id int64) (*domain.Agent, error) {
 	var agent domain.Agent
 	if err := r.db.WithContext(ctx).First(&agent, id).Error; err != nil {

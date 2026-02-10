@@ -44,6 +44,7 @@ type JobPayload struct {
 	Image       string            `json:"image"`
 	Commands    []string          `json:"commands"`
 	Environment map[string]string `json:"environment"`
+	Action      string            `json:"action"` // "restart", "update"
 }
 
 func New(serverAddr, secret string, capacity int) (*Agent, error) {
@@ -163,13 +164,30 @@ func (a *Agent) cancelListener(ctx context.Context) {
 
 func (a *Agent) register(ctx context.Context) error {
 	// 1. Authenticate
+	// Load persisted ID if available
+	savedID, _ := a.loadAgentID()
+	if savedID > 0 {
+		log.Printf("Loaded persisted Agent ID: %d", savedID)
+		a.agentID = savedID
+	}
+
 	authResp, err := a.authClient.Auth(ctx, &proto.AuthRequest{
 		AgentToken: a.secret,
+		AgentId:    a.agentID,
 	})
 	if err != nil {
 		return fmt.Errorf("auth failed: %w", err)
 	}
 	a.agentID = authResp.AgentId
+
+	// Persist ID if changed
+	if a.agentID != savedID {
+		if err := a.saveAgentID(a.agentID); err != nil {
+			log.Printf("Failed to save agent ID: %v", err)
+		} else {
+			log.Printf("Persisted Agent ID: %d", a.agentID)
+		}
+	}
 
 	// Create context with token metadata for subsequent calls
 	// We need to store this context or recreate it for every call.
@@ -464,6 +482,38 @@ func (a *Agent) executeJob(ctx context.Context, workflow *proto.Workflow) {
 		return
 	}
 
+	// CHECK FOR SYSTEM COMMANDS
+	if payload.Action != "" {
+		log.Printf("Received system command: %s", payload.Action)
+
+		// Report done immediately so server knows we received it
+		// For restart/update, we might die shortly after
+		a.reportDone(ctx, workflow.Id, "")
+
+		switch payload.Action {
+		case "restart":
+			log.Println("Restarting agent...")
+			os.Exit(0) // Let Docker/Supervisor restart us
+		case "update":
+			log.Println("Updating agent...")
+			// Pull latest image
+			// We should probably know our own image name.
+			// Assuming "quay.io/lethdat/picpic.agent:latest" or similar.
+			// Ideally passed via env var.
+			imageName := os.Getenv("AGENT_IMAGE")
+			if imageName == "" {
+				imageName = "quay.io/lethdat/picpic.agent:latest"
+			}
+
+			if err := a.docker.SelfUpdate(context.Background(), imageName, a.agentID); err != nil {
+				log.Printf("Update failed: %v", err)
+			} else {
+				os.Exit(0) // Should be killed by updater, but exit anyway
+			}
+		}
+		return
+	}
+
 	// 2. Init
 	mdCtx := a.withToken(ctx)
 	if _, err := a.client.Init(mdCtx, &proto.InitRequest{Id: workflow.Id}); err != nil {
@@ -605,4 +655,31 @@ func (a *Agent) unregister(ctx context.Context) error {
 	}
 	log.Printf("Agent %d unregistered successfully", a.agentID)
 	return nil
+}
+
+const AgentIDFile = "/data/agent_id"
+
+func (a *Agent) loadAgentID() (int64, error) {
+	data, err := os.ReadFile(AgentIDFile)
+	if err != nil {
+		return 0, err
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func (a *Agent) saveAgentID(id int64) error {
+	// Ensure directory exists
+	// But since we mount /data, it should exist.
+	// If not mounted, it might fail if /data doesn't exist?
+	// /bin/agent is root, so /data might need creation if not volume mounted?
+	// But our Dockerfile doesn't create /data. Volume mount creates it.
+	// Safe to assume /data exists or mkdir?
+	if err := os.MkdirAll("/data", 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(AgentIDFile, []byte(fmt.Sprintf("%d", id)), 0644)
 }

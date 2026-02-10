@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -162,4 +164,62 @@ func (d *DockerExecutor) Run(ctx context.Context, imageName string, commands []s
 
 func (d *DockerExecutor) cleanup(ctx context.Context, containerID string) {
 	d.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+}
+
+// SelfUpdate spawns a Watchtower container to update the current container
+func (d *DockerExecutor) SelfUpdate(ctx context.Context, imageTag string, agentID int64) error {
+	log.Printf("Initiating self-update using Watchtower...")
+
+	// 1. Get current container ID (hostname)
+	containerID, err := os.Hostname()
+	if err != nil {
+		return fmt.Errorf("failed to get hostname (container ID): %w", err)
+	}
+	log.Printf("Current Container ID: %s", containerID)
+
+	// 2. Pull Watchtower image
+	watchtowerImage := "containrrr/watchtower:latest"
+	reader, err := d.cli.ImagePull(ctx, watchtowerImage, image.PullOptions{})
+	if err != nil {
+		log.Printf("Failed to pull watchtower: %v", err)
+		return fmt.Errorf("failed to pull watchtower: %w", err)
+	}
+	io.Copy(io.Discard, reader)
+	reader.Close()
+
+	// 3. Configure Watchtower
+	// We map the Docker socket and tell it to update this specific container
+	// and clean up old images.
+	// watchtower --run-once --cleanup <container_id>
+
+	hostSock := os.Getenv("HOST_DOCKER_SOCK")
+	if hostSock == "" {
+		hostSock = "/var/run/docker.sock"
+	}
+
+	cmd := []string{"/watchtower", "--run-once", "--cleanup", "--debug", containerID}
+
+	resp, err := d.cli.ContainerCreate(ctx, &container.Config{
+		Image: watchtowerImage,
+		Cmd:   cmd,
+	}, &container.HostConfig{
+		Binds: []string{fmt.Sprintf("%s:/var/run/docker.sock", hostSock)},
+	}, nil, nil, fmt.Sprintf("watchtower-updater-%d-%d", agentID, time.Now().Unix()))
+
+	if err != nil {
+		return fmt.Errorf("failed to create watchtower container: %w", err)
+	}
+
+	// 4. Start Watchtower
+	if err := d.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("failed to start watchtower: %w", err)
+	}
+
+	log.Printf("Watchtower started with ID: %s. Monitoring...", resp.ID)
+
+	// We don't wait for it, because it will kill us (the agent container).
+	// But we can wait a bit to see if it starts successfully.
+	time.Sleep(2 * time.Second)
+
+	return nil
 }

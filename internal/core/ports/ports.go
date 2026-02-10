@@ -19,6 +19,7 @@ type JobRepository interface {
 
 type AgentRepository interface {
 	CreateOrUpdate(ctx context.Context, agent *domain.Agent) error
+	UpdateHeartbeat(ctx context.Context, id int64) error
 	GetAgent(ctx context.Context, id int64) (*domain.Agent, error)
 	GetAgentByName(ctx context.Context, name string) (*domain.Agent, error)
 	ListAgents(ctx context.Context) ([]*domain.Agent, error)

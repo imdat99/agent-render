@@ -87,9 +87,12 @@ services:
       - AGENT_SERVER=server:9000
       - AGENT_SECRET=mysecretkey
       - DOCKER_API_VERSION=1.44
+      - HOST_DOCKER_SOCK=/var/run/docker.sock
+      - AGENT_IMAGE=quay.io/lethdat/picpic.agent:latest
     volumes:
-      # - /var/run/docker.sock:/var/run/docker.sock
-      - /tmp/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock
+      # - /tmp/docker.sock:/var/run/docker.sock
+      - agent-1-data:/data
     networks:
       - picnic-net
     restart: always

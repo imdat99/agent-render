@@ -60,7 +60,14 @@ func (s *Server) routes() {
 	s.router.Get("/api/health", s.handleHealth)
 	s.router.Get("/api/health/detailed", s.handleDetailedHealth)
 	s.router.Get("/api/ws", s.handleWS)
-	s.router.Get("/api/agents", s.handleListAgents)
+	s.router.Get("/api/health/detailed", s.handleDetailedHealth)
+	s.router.Get("/api/ws", s.handleWS)
+
+	s.router.Route("/api/agents", func(r chi.Router) {
+		r.Get("/", s.handleListAgents)
+		r.Post("/{id}/restart", s.handleRestartAgent)
+		r.Post("/{id}/update", s.handleUpdateAgent)
+	})
 
 	s.router.Route("/api/jobs", func(r chi.Router) {
 		r.Post("/", s.handleCreateJob)
@@ -312,4 +319,36 @@ func (s *Server) handleRetryJob(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(job)
+}
+
+func (s *Server) handleRestartAgent(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid agent ID", http.StatusBadRequest)
+		return
+	}
+
+	if s.grpcServer.SendCommand(id, "restart") {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "restart command sent"})
+	} else {
+		http.Error(w, "Agent not active or command channel full", http.StatusServiceUnavailable)
+	}
+}
+
+func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid agent ID", http.StatusBadRequest)
+		return
+	}
+
+	if s.grpcServer.SendCommand(id, "update") {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "update command sent"})
+	} else {
+		http.Error(w, "Agent not active or command channel full", http.StatusServiceUnavailable)
+	}
 }

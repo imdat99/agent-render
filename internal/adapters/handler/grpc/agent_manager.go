@@ -15,8 +15,11 @@ type AgentInfo struct {
 	Backend       string
 	Version       string
 	Capacity      int32
+	CPU           float64
+	RAM           float64
 	LastHeartbeat time.Time
 	ConnectedAt   time.Time
+	CommandCh     chan string
 }
 
 // AgentManager manages active agent connections in memory
@@ -57,8 +60,37 @@ func (am *AgentManager) Register(id int64, name, platform, backend, version stri
 			Capacity:      capacity,
 			LastHeartbeat: now,
 			ConnectedAt:   now,
+			CommandCh:     make(chan string, 10),
 		}
 	}
+}
+
+// GetCommandChannel returns the command channel for an agent
+func (am *AgentManager) GetCommandChannel(id int64) (chan string, bool) {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	if agent, ok := am.agents[id]; ok {
+		return agent.CommandCh, true
+	}
+	return nil, false
+}
+
+// SendCommand sends a command to a specific agent
+func (am *AgentManager) SendCommand(id int64, cmd string) bool {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	if agent, ok := am.agents[id]; ok {
+		// Non-blocking send
+		select {
+		case agent.CommandCh <- cmd:
+			return true
+		default:
+			return false // Channel full
+		}
+	}
+	return false
 }
 
 // UpdateHeartbeat updates the last heartbeat time for an agent
@@ -67,6 +99,18 @@ func (am *AgentManager) UpdateHeartbeat(id int64) {
 	defer am.mu.Unlock()
 
 	if agent, ok := am.agents[id]; ok {
+		agent.LastHeartbeat = time.Now()
+	}
+}
+
+// UpdateResources updates the CPU and RAM usage for an agent
+func (am *AgentManager) UpdateResources(id int64, cpu, ram float64) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	if agent, ok := am.agents[id]; ok {
+		agent.CPU = cpu
+		agent.RAM = ram
 		agent.LastHeartbeat = time.Now()
 	}
 }
@@ -106,6 +150,8 @@ func (am *AgentManager) ListActive(timeout time.Duration) []*domain.Agent {
 				Version:       info.Version,
 				Capacity:      info.Capacity,
 				Status:        domain.AgentStatusOnline,
+				CPU:           info.CPU,
+				RAM:           info.RAM,
 				LastHeartbeat: info.LastHeartbeat,
 				CreatedAt:     info.ConnectedAt,
 				UpdatedAt:     info.LastHeartbeat,
@@ -138,6 +184,8 @@ func (am *AgentManager) ListAll() []*domain.Agent {
 			Version:       info.Version,
 			Capacity:      info.Capacity,
 			Status:        status,
+			CPU:           info.CPU,
+			RAM:           info.RAM,
 			LastHeartbeat: info.LastHeartbeat,
 			CreatedAt:     info.ConnectedAt,
 			UpdatedAt:     info.LastHeartbeat,

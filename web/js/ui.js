@@ -26,7 +26,8 @@ export function renderAgents() {
                     <div class="flex items-center gap-2">
                         <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">Online</span>
                         <span class="text-[10px] text-slate-500">${agent.capacity} cores</span>
-                         <span class="text-[10px] text-slate-500">${agent.cpu ? agent.cpu.toFixed(1) + '%' : ''}</span>
+                         <span class="text-[10px] text-slate-500" title="CPU">${agent.cpu ? agent.cpu.toFixed(1) + '%' : '0%'}</span>
+                         <span class="text-[10px] text-slate-500" title="RAM">${agent.ram ? agent.ram.toFixed(0) + 'MB' : '0MB'}</span>
                     </div>
                 </div>
             </div>
@@ -63,11 +64,39 @@ async function showAgentDetails(agentId) {
     document.getElementById('agent-modal-platform').textContent = agent.platform || 'linux/amd64';
     document.getElementById('agent-modal-backend').textContent = agent.backend || 'docker';
     document.getElementById('agent-modal-cpu').textContent = (agent.cpu ? agent.cpu.toFixed(1) : '0') + '% CPU';
+    document.getElementById('agent-modal-ram').textContent = (agent.ram ? agent.ram.toFixed(0) : '0') + ' MB RAM';
     document.getElementById('agent-modal-capacity').textContent = agent.capacity + ' cores';
 
     // Active jobs count
     const jobCount = agent.active_job_count || 0;
     document.getElementById('agent-modal-jobs-count').textContent = jobCount;
+
+    // Add Actions
+    const actionsContainer = document.getElementById('agent-modal-actions');
+    if (actionsContainer) {
+        actionsContainer.innerHTML = `
+            <button id="btn-restart-agent" class="px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-500 rounded border border-yellow-500/20 text-xs font-medium transition-colors">
+                Restart Agent
+            </button>
+            <button id="btn-update-agent" class="px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 rounded border border-blue-500/20 text-xs font-medium transition-colors">
+                Update Agent
+            </button>
+        `;
+
+        document.getElementById('btn-restart-agent').onclick = async () => {
+            if (confirm('Are you sure you want to restart this agent? It will go offline temporarily.')) {
+                const { restartAgent } = await import('./api.js');
+                await restartAgent(agent.id);
+            }
+        };
+
+        document.getElementById('btn-update-agent').onclick = async () => {
+            if (confirm('Are you sure you want to update this agent? It will download the latest image and restart.')) {
+                const { updateAgent } = await import('./api.js');
+                await updateAgent(agent.id);
+            }
+        };
+    }
 
     // Fetch and render jobs
     const jobsList = document.getElementById('agent-modal-jobs-list');
