@@ -149,7 +149,7 @@ message NextResponse {
 }
 
 message RegisterAgentResponse {
-  int64 agent_id = 1;
+  string agent_id = 1;
 }
 
 message WaitResponse {
@@ -164,13 +164,13 @@ service WoodpeckerAuth {
 
 message AuthRequest {
   string agent_token = 1;
-  int64  agent_id    = 2;
+  string agent_id    = 2;
   string hostname    = 3;
 }
 
 message AuthResponse {
   string status        = 1;
-  int64  agent_id      = 2;
+  string agent_id      = 2;
   string access_token  = 3;
 }
 

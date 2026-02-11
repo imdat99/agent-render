@@ -216,7 +216,11 @@ export function renderJobs(onSelectJob) {
                 </div>
                 <div class="min-w-0">
                     <div class="text-xs text-slate-300 truncate font-medium">${job.config.image || 'unknown-image'}</div>
-                    <div class="text-[10px] text-slate-500 truncate mt-0.5 font-mono">${new Date(job.created_at).toLocaleTimeString()}</div>
+                    <div class="text-[10px] text-slate-500 truncate mt-0.5 font-mono">
+                         ${new Date(job.created_at).toLocaleTimeString()}
+                         <span class="ml-2 text-slate-600">ID:${job.user_id}</span>
+                         <span class="ml-2 text-slate-600">Pri:${job.priority}</span>
+                    </div>
                 </div>
             </div>
         </div>`;
@@ -297,9 +301,12 @@ export function updateJobDetails(job) {
 
     // Duration
     const isFinished = ['success', 'failure', 'cancelled'].includes(job.status);
-    // If running, we might want to update duration periodically? 
-    // For now, static update on select/refresh.
     document.getElementById('current-job-duration').textContent = formatDuration(job.created_at, isFinished ? job.updated_at : null);
+
+    // New Fields
+    document.getElementById('current-job-user').textContent = job.user_id || '-';
+    document.getElementById('current-job-priority').textContent = job.priority;
+    document.getElementById('current-job-limit').textContent = job.time_limit || '-';
 
     // Command
     const cmd = job.config.commands ? job.config.commands.join(' ') : '';

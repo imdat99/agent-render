@@ -1014,7 +1014,7 @@ func (x *NextResponse) GetWorkflow() *Workflow {
 
 type RegisterAgentResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       int64                  `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1049,11 +1049,11 @@ func (*RegisterAgentResponse) Descriptor() ([]byte, []int) {
 	return file_proto_woodpecker_proto_rawDescGZIP(), []int{18}
 }
 
-func (x *RegisterAgentResponse) GetAgentId() int64 {
+func (x *RegisterAgentResponse) GetAgentId() string {
 	if x != nil {
 		return x.AgentId
 	}
-	return 0
+	return ""
 }
 
 type WaitResponse struct {
@@ -1103,7 +1103,7 @@ func (x *WaitResponse) GetCanceled() bool {
 type AuthRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentToken    string                 `protobuf:"bytes,1,opt,name=agent_token,json=agentToken,proto3" json:"agent_token,omitempty"`
-	AgentId       int64                  `protobuf:"varint,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	AgentId       string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	Hostname      string                 `protobuf:"bytes,3,opt,name=hostname,proto3" json:"hostname,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1146,11 +1146,11 @@ func (x *AuthRequest) GetAgentToken() string {
 	return ""
 }
 
-func (x *AuthRequest) GetAgentId() int64 {
+func (x *AuthRequest) GetAgentId() string {
 	if x != nil {
 		return x.AgentId
 	}
-	return 0
+	return ""
 }
 
 func (x *AuthRequest) GetHostname() string {
@@ -1163,7 +1163,7 @@ func (x *AuthRequest) GetHostname() string {
 type AuthResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	AgentId       int64                  `protobuf:"varint,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	AgentId       string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	AccessToken   string                 `protobuf:"bytes,3,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1206,11 +1206,11 @@ func (x *AuthResponse) GetStatus() string {
 	return ""
 }
 
-func (x *AuthResponse) GetAgentId() int64 {
+func (x *AuthResponse) GetAgentId() string {
 	if x != nil {
 		return x.AgentId
 	}
-	return 0
+	return ""
 }
 
 func (x *AuthResponse) GetAccessToken() string {
@@ -1406,17 +1406,17 @@ const file_proto_woodpecker_proto_rawDesc = "" +
 	"\fNextResponse\x12+\n" +
 	"\bworkflow\x18\x01 \x01(\v2\x0f.proto.WorkflowR\bworkflow\"2\n" +
 	"\x15RegisterAgentResponse\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\x03R\aagentId\"*\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\"*\n" +
 	"\fWaitResponse\x12\x1a\n" +
 	"\bcanceled\x18\x01 \x01(\bR\bcanceled\"e\n" +
 	"\vAuthRequest\x12\x1f\n" +
 	"\vagent_token\x18\x01 \x01(\tR\n" +
 	"agentToken\x12\x19\n" +
-	"\bagent_id\x18\x02 \x01(\x03R\aagentId\x12\x1a\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x1a\n" +
 	"\bhostname\x18\x03 \x01(\tR\bhostname\"d\n" +
 	"\fAuthResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x19\n" +
-	"\bagent_id\x18\x02 \x01(\x03R\aagentId\x12!\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12!\n" +
 	"\faccess_token\x18\x03 \x01(\tR\vaccessToken\"6\n" +
 	"\rStreamOptions\x12%\n" +
 	"\x06filter\x18\x01 \x01(\v2\r.proto.FilterR\x06filter\"g\n" +

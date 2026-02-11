@@ -7,7 +7,7 @@ type LogEntry struct {
 }
 
 type SystemResource struct {
-	AgentID int64   `json:"agent_id"`
+	AgentID string  `json:"agent_id"`
 	CPU     float64 `json:"cpu"`
 	RAM     float64 `json:"ram"` // In MB
 }

@@ -24,7 +24,7 @@ type Agent struct {
 	secret     string
 	token      string
 	capacity   int
-	agentID    int64
+	agentID    string
 	docker     *DockerExecutor
 
 	// Concurrency control
@@ -83,7 +83,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			return err
 		}
 
-		log.Printf("Agent started/reconnected with ID: %d, Capacity: %d", a.agentID, a.capacity)
+		log.Printf("Agent started/reconnected with ID: %s, Capacity: %d", a.agentID, a.capacity)
 
 		// 2. Create session context
 		// This context controls the lifecycle of this specific connection session
@@ -165,12 +165,12 @@ func (a *Agent) cancelListener(ctx context.Context) {
 func (a *Agent) register(ctx context.Context) error {
 	// 1. Authenticate
 	// Load persisted ID if available (unless forced new)
-	var savedID int64
+	var savedID string
 	if os.Getenv("FORCE_NEW_ID") != "true" {
 		var err error
 		savedID, err = a.loadAgentID()
-		if err == nil && savedID > 0 {
-			log.Printf("Loaded persisted Agent ID: %d", savedID)
+		if err == nil && savedID != "" {
+			log.Printf("Loaded persisted Agent ID: %s", savedID)
 			a.agentID = savedID
 		}
 	} else {
@@ -192,7 +192,7 @@ func (a *Agent) register(ctx context.Context) error {
 		if err := a.saveAgentID(a.agentID); err != nil {
 			log.Printf("Failed to save agent ID: %v", err)
 		} else {
-			log.Printf("Persisted Agent ID: %d", a.agentID)
+			log.Printf("Persisted Agent ID: %s", a.agentID)
 		}
 	}
 
@@ -665,7 +665,7 @@ const (
 )
 
 type AgentIdentity struct {
-	ID          int64  `json:"id"`
+	ID          string `json:"id"`
 	Fingerprint string `json:"fingerprint"`
 }
 
@@ -680,10 +680,10 @@ func (a *Agent) getHostFingerprint() string {
 	return hostname
 }
 
-func (a *Agent) loadAgentID() (int64, error) {
+func (a *Agent) loadAgentID() (string, error) {
 	data, err := os.ReadFile(AgentIDFile)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 
 	// Try parsing as JSON first (new format)
@@ -693,20 +693,21 @@ func (a *Agent) loadAgentID() (int64, error) {
 		currentFP := a.getHostFingerprint()
 		if identity.Fingerprint != "" && identity.Fingerprint != currentFP {
 			log.Printf("Environment changed (Hostname mismatch: saved=%s, current=%s). Resetting Agent ID.", identity.Fingerprint, currentFP)
-			return 0, fmt.Errorf("environment changed")
+			return "", fmt.Errorf("environment changed")
 		}
 		return identity.ID, nil
 	}
 
-	// Fallback: Parse as simple int64 (legacy/migration)
-	id, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
-	if err != nil {
-		return 0, err
+	// Fallback: Parse as simple string (legacy/migration)
+	// If it was an int, it will be parsed as string
+	id := strings.TrimSpace(string(data))
+	if id == "" {
+		return "", fmt.Errorf("empty ID")
 	}
 	return id, nil
 }
 
-func (a *Agent) saveAgentID(id int64) error {
+func (a *Agent) saveAgentID(id string) error {
 	if err := os.MkdirAll("/data", 0755); err != nil {
 		return err
 	}

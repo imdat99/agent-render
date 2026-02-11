@@ -97,21 +97,34 @@ async function handleCreateJob(e) {
     btn.innerHTML = `<svg class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Deploying...`;
 
     const image = document.getElementById('image').value;
+
     const command = document.getElementById('command').value;
+    const name = document.getElementById('name').value;
+    const userId = document.getElementById('user_id').value;
+    const priority = document.getElementById('priority').value;
+    const timeLimit = document.getElementById('time_limit').value;
+
+    console.log("Creating Job with:", { image, command, name, userId, priority, timeLimit });
 
     try {
-        const job = await api.createJob(image, command);
+        const job = await api.createJob(image, command, name, userId, priority, timeLimit);
         if (job) {
-            document.getElementById('new-job-modal').classList.add('hidden');
+            // Close modal (assuming modal logic exists in ui.js or here, but here it says 'hidden')
+            const modal = document.getElementById('new-job-modal');
+            if (modal) modal.classList.add('hidden');
+
             e.target.reset();
-            await updateJobs();
-            handleJobSelect(job.id);
+            await updateJobs(); // Refresh job list
+            handleJobSelect(job.id); // Select the new job
         }
     } catch (err) {
-        // Error handled in api.createJob (alert)
+        // Error handled in api.createJob (alert/throw)
+        console.error("Failed to create job", err);
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
     }
 }
 

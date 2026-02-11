@@ -167,7 +167,7 @@ func (d *DockerExecutor) cleanup(ctx context.Context, containerID string) {
 }
 
 // SelfUpdate spawns a Watchtower container to update the current container
-func (d *DockerExecutor) SelfUpdate(ctx context.Context, imageTag string, agentID int64) error {
+func (d *DockerExecutor) SelfUpdate(ctx context.Context, imageTag string, agentID string) error {
 	log.Printf("Initiating self-update using Watchtower...")
 
 	// 1. Get current container ID (hostname)
@@ -204,7 +204,7 @@ func (d *DockerExecutor) SelfUpdate(ctx context.Context, imageTag string, agentI
 		Cmd:   cmd,
 	}, &container.HostConfig{
 		Binds: []string{fmt.Sprintf("%s:/var/run/docker.sock", hostSock)},
-	}, nil, nil, fmt.Sprintf("watchtower-updater-%d-%d", agentID, time.Now().Unix()))
+	}, nil, nil, fmt.Sprintf("watchtower-updater-%s-%d", agentID, time.Now().Unix()))
 
 	if err != nil {
 		return fmt.Errorf("failed to create watchtower container: %w", err)

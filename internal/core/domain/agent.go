@@ -15,7 +15,7 @@ const (
 )
 
 type Agent struct {
-	ID            int64                  `json:"id" gorm:"primaryKey"`
+	ID            string                 `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	Name          string                 `json:"name"`
 	Platform      string                 `json:"platform"`
 	Backend       string                 `json:"backend"`

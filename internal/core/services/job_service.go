@@ -35,11 +35,14 @@ func NewJobService(
 	}
 }
 
-func (s *JobService) CreateJob(ctx context.Context, image string, config []byte, priority int) (*domain.Job, error) {
+func (s *JobService) CreateJob(ctx context.Context, userID string, name, image string, config []byte, priority int, timeLimit int64) (*domain.Job, error) {
 	job := &domain.Job{
-		ID:        fmt.Sprintf("job-%s", uuid.New().String()), // UUID for unique ID generation
+		ID:        uuid.New().String(), // UUID for unique ID generation
+		UserID:    userID,
+		Name:      name,
 		Status:    domain.JobStatusPending,
 		Priority:  priority,
+		TimeLimit: timeLimit,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		Config:    string(config),
@@ -97,7 +100,7 @@ func (s *JobService) GetJob(ctx context.Context, id string) (*domain.Job, error)
 	return s.jobRepo.GetJob(ctx, id)
 }
 
-func (s *JobService) GetAgent(ctx context.Context, id int64) (*domain.Agent, error) {
+func (s *JobService) GetAgent(ctx context.Context, id string) (*domain.Agent, error) {
 	return s.agentRepo.GetAgent(ctx, id)
 }
 
@@ -107,6 +110,7 @@ func (s *JobService) GetAgentByName(ctx context.Context, name string) (*domain.A
 
 func (s *JobService) CreatePlaceholderAgent(ctx context.Context) (*domain.Agent, error) {
 	agent := &domain.Agent{
+		ID:            uuid.New().String(),
 		Name:          "Pending Agent",
 		Status:        domain.AgentStatusOffline,
 		LastHeartbeat: time.Now(),
@@ -118,7 +122,7 @@ func (s *JobService) CreatePlaceholderAgent(ctx context.Context) (*domain.Agent,
 	return agent, nil
 }
 
-func (s *JobService) UpdateAgentInfo(ctx context.Context, id int64, name, platform, backend, version string, capacity int32) (*domain.Agent, error) {
+func (s *JobService) UpdateAgentInfo(ctx context.Context, id string, name, platform, backend, version string, capacity int32) (*domain.Agent, error) {
 	agent, err := s.agentRepo.GetAgent(ctx, id)
 	if err != nil {
 		return nil, err
@@ -141,7 +145,7 @@ func (s *JobService) UpdateAgentInfo(ctx context.Context, id int64, name, platfo
 	return agent, s.agentRepo.CreateOrUpdate(ctx, agent)
 }
 
-func (s *JobService) UpdateAgentHeartbeat(ctx context.Context, id int64) error {
+func (s *JobService) UpdateAgentHeartbeat(ctx context.Context, id string) error {
 	return s.agentRepo.UpdateHeartbeat(ctx, id)
 }
 
@@ -164,7 +168,7 @@ func (s *JobService) ListAgentsWithStats(ctx context.Context) ([]*AgentWithStats
 	for _, agent := range agents {
 		count, err := s.jobRepo.CountActiveJobsByAgent(ctx, agent.ID)
 		if err != nil {
-			log.Printf("Failed to count active jobs for agent %d: %v", agent.ID, err)
+			log.Printf("Failed to count active jobs for agent %s: %v", agent.ID, err)
 			count = 0
 		}
 		result = append(result, &AgentWithStats{
@@ -175,7 +179,7 @@ func (s *JobService) ListAgentsWithStats(ctx context.Context) ([]*AgentWithStats
 	return result, nil
 }
 
-func (s *JobService) ListJobsByAgent(ctx context.Context, agentID int64, offset, limit int) (*PaginatedJobs, error) {
+func (s *JobService) ListJobsByAgent(ctx context.Context, agentID string, offset, limit int) (*PaginatedJobs, error) {
 	if offset < 0 {
 		offset = 0
 	}
@@ -202,7 +206,7 @@ func (s *JobService) ListJobsByAgent(ctx context.Context, agentID int64, offset,
 	}, nil
 }
 
-func (s *JobService) GetActiveJobCount(ctx context.Context, agentID int64) (int64, error) {
+func (s *JobService) GetActiveJobCount(ctx context.Context, agentID string) (int64, error) {
 	return s.jobRepo.CountActiveJobsByAgent(ctx, agentID)
 }
 
@@ -302,13 +306,13 @@ func (s *JobService) UpdateJobStatus(ctx context.Context, jobID string, status d
 	return nil
 }
 
-func (s *JobService) AssignJob(ctx context.Context, jobID string, agentID int64) error {
+func (s *JobService) AssignJob(ctx context.Context, jobID string, agentID string) error {
 	job, err := s.jobRepo.GetJob(ctx, jobID)
 	if err != nil {
 		return err
 	}
 
-	job.AgentID = agentID
+	job.AgentID = &agentID
 	job.Status = domain.JobStatusRunning // Or submitted? Usually running when assigned or about to run.
 	// Actually "submitted" means sent to agent? "running" means agent started it.
 	// But let's set it to running for simplicity or "submitted".
@@ -354,8 +358,9 @@ func (s *JobService) CancelJob(ctx context.Context, jobID string) error {
 	}
 
 	// Publish cancellation event to notify agents
-	if job.AgentID != 0 {
-		if err := s.pubsub.PublishCancel(ctx, job.AgentID, job.ID); err != nil {
+	// Publish cancellation event to notify agents
+	if job.AgentID != nil && *job.AgentID != "" {
+		if err := s.pubsub.PublishCancel(ctx, *job.AgentID, job.ID); err != nil {
 			log.Printf("Failed to publish cancel signal: %v", err)
 		}
 	}
@@ -424,7 +429,7 @@ func (s *JobService) UpdateJobProgress(ctx context.Context, jobID string, progre
 	return s.pubsub.Publish(ctx, jobID, "", progress)
 }
 
-func (s *JobService) PublishSystemResources(ctx context.Context, agentID int64, data []byte) error {
+func (s *JobService) PublishSystemResources(ctx context.Context, agentID string, data []byte) error {
 	return s.pubsub.PublishResource(ctx, agentID, data)
 }
 
@@ -432,7 +437,7 @@ func (s *JobService) SubscribeSystemResources(ctx context.Context) (<-chan domai
 	return s.pubsub.SubscribeResources(ctx)
 }
 
-func (s *JobService) SubscribeCancel(ctx context.Context, agentID int64) (<-chan string, error) {
+func (s *JobService) SubscribeCancel(ctx context.Context, agentID string) (<-chan string, error) {
 	return s.pubsub.SubscribeCancel(ctx, agentID)
 }
 

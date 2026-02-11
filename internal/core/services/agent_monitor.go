@@ -20,7 +20,7 @@ type AgentMonitor struct {
 }
 
 type AgentAlert struct {
-	AgentID   int64
+	AgentID   string
 	AgentName string
 	Event     string // "offline", "online", "unhealthy"
 	Timestamp time.Time
@@ -81,13 +81,13 @@ func (am *AgentMonitor) Alerts() <-chan AgentAlert {
 func (am *AgentMonitor) SendWebhook(webhookURL string, alert AgentAlert) error {
 	// TODO: Implement webhook sending
 	// For now, just log
-	log.Printf("ALERT: Agent %s (%d) is %s at %v",
+	log.Printf("ALERT: Agent %s (%s) is %s at %v",
 		alert.AgentName, alert.AgentID, alert.Event, alert.Timestamp)
 	return nil
 }
 
 // GetAgentStatus returns the current status of an agent
-func (am *AgentMonitor) GetAgentStatus(ctx context.Context, agentID int64) (string, error) {
+func (am *AgentMonitor) GetAgentStatus(ctx context.Context, agentID string) (string, error) {
 	agent, err := am.agentRepo.GetAgent(ctx, agentID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get agent: %w", err)
@@ -102,6 +102,6 @@ func (am *AgentMonitor) GetAgentStatus(ctx context.Context, agentID int64) (stri
 }
 
 // GetAgentHealth returns health metrics for an agent
-func (am *AgentMonitor) GetAgentHealth(ctx context.Context, agentID int64) (*domain.Agent, error) {
+func (am *AgentMonitor) GetAgentHealth(ctx context.Context, agentID string) (*domain.Agent, error) {
 	return am.agentRepo.GetAgent(ctx, agentID)
 }

@@ -26,10 +26,10 @@ type Server struct {
 	proto.UnimplementedWoodpeckerAuthServer
 	jobService   *services.JobService
 	agentManager *AgentManager
-	sessions     sync.Map // map[string]int64 (Token -> AgentID)
+	sessions     sync.Map // map[string]string (Token -> AgentID)
 
 	// Track which jobs are assigned to which agents for cleanup on disconnect
-	agentJobs sync.Map // map[int64]map[string]bool (AgentID -> Set of JobIDs)
+	agentJobs sync.Map // map[string]map[string]bool (AgentID -> Set of JobIDs)
 }
 
 // ... NewServer ...
@@ -53,20 +53,20 @@ func generateToken() string {
 	return hex.EncodeToString(b)
 }
 
-func (s *Server) getAgentIDFromContext(ctx context.Context) (int64, string, bool) {
+func (s *Server) getAgentIDFromContext(ctx context.Context) (string, string, bool) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return 0, "", false
+		return "", "", false
 	}
 	tokens := md.Get("token")
 	if len(tokens) == 0 {
-		return 0, "", false
+		return "", "", false
 	}
 	token := tokens[0]
 	if id, ok := s.sessions.Load(token); ok {
-		return id.(int64), token, true
+		return id.(string), token, true
 	}
-	return 0, "", false
+	return "", "", false
 }
 
 func (s *Server) Next(ctx context.Context, req *proto.NextRequest) (*proto.NextResponse, error) {
@@ -81,11 +81,11 @@ func (s *Server) StreamJobs(req *proto.StreamOptions, stream proto.Woodpecker_St
 		return status.Error(codes.Unauthenticated, "invalid or missing token")
 	}
 
-	log.Printf("Agent %d connected to Job Stream", agentID)
+	log.Printf("Agent %s connected to Job Stream", agentID)
 
 	// Update agent heartbeat in database
 	if err := s.jobService.UpdateAgentHeartbeat(ctx, agentID); err != nil {
-		log.Printf("Failed to update heartbeat for agent %d: %v", agentID, err)
+		log.Printf("Failed to update heartbeat for agent %s: %v", agentID, err)
 	}
 
 	// Load agent info from database and register in memory if not already
@@ -101,7 +101,7 @@ func (s *Server) StreamJobs(req *proto.StreamOptions, stream proto.Woodpecker_St
 	// Subscribe to cancellation events for this agent
 	cancelCh, err := s.jobService.SubscribeCancel(ctx, agentID)
 	if err != nil {
-		log.Printf("Failed to subscribe to cancellations for agent %d: %v", agentID, err)
+		log.Printf("Failed to subscribe to cancellations for agent %s: %v", agentID, err)
 		// Continue without cancellation support? Or return error?
 		// Better to continue log, but maybe retry?
 	}
@@ -112,7 +112,7 @@ func (s *Server) StreamJobs(req *proto.StreamOptions, stream proto.Woodpecker_St
 	for {
 		select {
 		case cmd := <-commandCh:
-			log.Printf("Sending command %s to agent %d", cmd, agentID)
+			log.Printf("Sending command %s to agent %s", cmd, agentID)
 
 			// Job Payload with Action
 			jobPayload := map[string]interface{}{
@@ -125,30 +125,30 @@ func (s *Server) StreamJobs(req *proto.StreamOptions, stream proto.Woodpecker_St
 
 			// Send to stream
 			err = stream.Send(&proto.Workflow{
-				Id:      fmt.Sprintf("cmd-%d-%d", agentID, time.Now().UnixNano()),
+				Id:      fmt.Sprintf("cmd-%s-%d", agentID, time.Now().UnixNano()),
 				Timeout: 300,
 				Payload: payloadBytes,
 			})
 			if err != nil {
-				log.Printf("Failed to send command to agent %d: %v", agentID, err)
+				log.Printf("Failed to send command to agent %s: %v", agentID, err)
 			}
 
 		case jobID := <-cancelCh:
-			log.Printf("Received cancel signal for job %s directed to agent %d", jobID, agentID)
+			log.Printf("Received cancel signal for job %s directed to agent %s", jobID, agentID)
 			// Verify if agent is running this job
 			if s.isJobAssigned(agentID, jobID) {
-				log.Printf("Forwarding cancel signal for job %s to agent %d", jobID, agentID)
+				log.Printf("Forwarding cancel signal for job %s to agent %s", jobID, agentID)
 				if err := stream.Send(&proto.Workflow{
 					Id:     jobID,
 					Cancel: true,
 				}); err != nil {
-					log.Printf("Failed to send cancel signal to agent %d: %v", agentID, err)
+					log.Printf("Failed to send cancel signal to agent %s: %v", agentID, err)
 				}
 			} else {
-				log.Printf("Job %s not currently assigned to agent %d, ignoring cancel", jobID, agentID)
+				log.Printf("Job %s not currently assigned to agent %s, ignoring cancel", jobID, agentID)
 			}
 		case <-ctx.Done():
-			log.Printf("Agent %d disconnected from job stream", agentID)
+			log.Printf("Agent %s disconnected from job stream", agentID)
 			return nil
 		case <-ticker.C:
 			// Heartbeat in both database and memory
@@ -174,12 +174,12 @@ func (s *Server) StreamJobs(req *proto.StreamOptions, stream proto.Woodpecker_St
 				continue
 			}
 
-			log.Printf("Assigning job %s to agent %d (via stream)", job.ID, agentID)
+			log.Printf("Assigning job %s to agent %s (via stream)", job.ID, agentID)
 			s.trackJobAssignment(agentID, job.ID)
 
 			// Update AgentID in DB
 			if err := s.jobService.AssignJob(ctx, job.ID, agentID); err != nil {
-				log.Printf("Failed to assign job %s to agent %d: %v", job.ID, agentID, err)
+				log.Printf("Failed to assign job %s to agent %s: %v", job.ID, agentID, err)
 				continue
 			}
 
@@ -219,11 +219,11 @@ func (s *Server) StreamJobs(req *proto.StreamOptions, stream proto.Woodpecker_St
 			// Send to stream
 			err = stream.Send(&proto.Workflow{
 				Id:      job.ID,
-				Timeout: 3600,
+				Timeout: job.TimeLimit,
 				Payload: payloadBytes,
 			})
 			if err != nil {
-				log.Printf("Failed to send job %s to agent %d: %v. Re-queueing...", job.ID, agentID, err)
+				log.Printf("Failed to send job %s to agent %s: %v. Re-queueing...", job.ID, agentID, err)
 				// Re-queue job
 				// Assuming UpdateJobStatus(Queued) is enough
 				s.jobService.UpdateJobStatus(ctx, job.ID, domain.JobStatusPending)
@@ -244,7 +244,7 @@ func (s *Server) SubmitStatus(stream proto.Woodpecker_SubmitStatusServer) error 
 	for {
 		update, err := stream.Recv()
 		if err != nil {
-			log.Printf("SubmitStatus stream ended for agent %d: %v", agentID, err)
+			log.Printf("SubmitStatus stream ended for agent %s: %v", agentID, err)
 			return nil
 		}
 
@@ -378,19 +378,19 @@ func (s *Server) RegisterAgent(ctx context.Context, req *proto.RegisterAgentRequ
 	// Use hostname as name, fallback to "agent-{id}" if not provided
 	name := hostname
 	if name == "" {
-		name = fmt.Sprintf("agent-%d", id)
+		name = fmt.Sprintf("agent-%s", id)
 	}
 
 	// Update agent info in database
 	_, err := s.jobService.UpdateAgentInfo(ctx, id, name, req.Info.Platform, req.Info.Backend, req.Info.Version, req.Info.Capacity)
 	if err != nil {
-		log.Printf("Failed to update agent %d in database: %v", id, err)
+		log.Printf("Failed to update agent %s in database: %v", id, err)
 	}
 
 	// Register agent in memory
 	s.agentManager.Register(id, name, req.Info.Platform, req.Info.Backend, req.Info.Version, req.Info.Capacity)
 
-	log.Printf("Successfully registered agent ID=%d with Capacity=%d, Name=%s", id, req.Info.Capacity, name)
+	log.Printf("Successfully registered agent ID=%s with Capacity=%d, Name=%s", id, req.Info.Capacity, name)
 
 	return &proto.RegisterAgentResponse{
 		AgentId: id,
@@ -398,23 +398,23 @@ func (s *Server) RegisterAgent(ctx context.Context, req *proto.RegisterAgentRequ
 }
 
 // trackJobAssignment tracks that a job has been assigned to an agent
-func (s *Server) trackJobAssignment(agentID int64, jobID string) {
+func (s *Server) trackJobAssignment(agentID string, jobID string) {
 	// Create new map if doesn't exist, or load existing
 	jobSetInterface, _ := s.agentJobs.LoadOrStore(agentID, &sync.Map{})
 	jobSet, ok := jobSetInterface.(*sync.Map)
 	if !ok {
-		log.Printf("ERROR: agentJobs contains non-*sync.Map value for agent %d", agentID)
+		log.Printf("ERROR: agentJobs contains non-*sync.Map value for agent %s", agentID)
 		return
 	}
 	jobSet.Store(jobID, true)
 }
 
 // untrackJobAssignment removes job tracking when job completes
-func (s *Server) untrackJobAssignment(agentID int64, jobID string) {
+func (s *Server) untrackJobAssignment(agentID string, jobID string) {
 	if jobSetInterface, ok := s.agentJobs.Load(agentID); ok {
 		jobSet, ok := jobSetInterface.(*sync.Map)
 		if !ok {
-			log.Printf("ERROR: agentJobs contains non-*sync.Map value for agent %d", agentID)
+			log.Printf("ERROR: agentJobs contains non-*sync.Map value for agent %s", agentID)
 			return
 		}
 		jobSet.Delete(jobID)
@@ -422,12 +422,12 @@ func (s *Server) untrackJobAssignment(agentID int64, jobID string) {
 }
 
 // getAgentJobs returns all jobs assigned to an agent
-func (s *Server) getAgentJobs(agentID int64) []string {
+func (s *Server) getAgentJobs(agentID string) []string {
 	var jobs []string
 	if jobSetInterface, ok := s.agentJobs.Load(agentID); ok {
 		jobSet, ok := jobSetInterface.(*sync.Map)
 		if !ok {
-			log.Printf("ERROR: agentJobs contains non-*sync.Map value for agent %d", agentID)
+			log.Printf("ERROR: agentJobs contains non-*sync.Map value for agent %s", agentID)
 			return jobs
 		}
 		jobSet.Range(func(key, value interface{}) bool {
@@ -439,7 +439,7 @@ func (s *Server) getAgentJobs(agentID int64) []string {
 }
 
 // isJobAssigned checks if a job is currently assigned to an agent
-func (s *Server) isJobAssigned(agentID int64, jobID string) bool {
+func (s *Server) isJobAssigned(agentID string, jobID string) bool {
 	if jobSetInterface, ok := s.agentJobs.Load(agentID); ok {
 		jobSet, ok := jobSetInterface.(*sync.Map)
 		if !ok {
@@ -457,12 +457,12 @@ func (s *Server) UnregisterAgent(ctx context.Context, req *proto.Empty) (*proto.
 		return nil, status.Error(codes.Unauthenticated, "invalid session")
 	}
 
-	log.Printf("Agent %d unregistering", agentID)
+	log.Printf("Agent %s unregistering", agentID)
 
 	// Mark all assigned jobs as failed (agent disconnected unexpectedly)
 	jobs := s.getAgentJobs(agentID)
 	for _, jobID := range jobs {
-		log.Printf("Marking job %s as failed due to agent %d disconnect", jobID, agentID)
+		log.Printf("Marking job %s as failed due to agent %s disconnect", jobID, agentID)
 		if err := s.jobService.UpdateJobStatus(ctx, jobID, domain.JobStatusFailure); err != nil {
 			log.Printf("Failed to update job %s status: %v", jobID, err)
 		}
@@ -490,22 +490,29 @@ func (s *Server) ReportHealth(ctx context.Context, req *proto.ReportHealthReques
 
 // Auth component
 func (s *Server) Auth(ctx context.Context, req *proto.AuthRequest) (*proto.AuthResponse, error) {
-	log.Printf("Agent Auth Request: Token=%s, ID=%d", req.AgentToken, req.AgentId)
+	log.Printf("Agent Auth Request: Token=%s, ID=%s", req.AgentToken, req.AgentId)
+
+	// Clean up Agent ID (remove "agent-" prefix if present)
+	cleanID := req.AgentId
+	if len(cleanID) > 6 && cleanID[:6] == "agent-" {
+		cleanID = cleanID[6:]
+	}
+	req.AgentId = cleanID
 
 	var agent *domain.Agent
 	var err error
 
 	// 1. Try to reuse existing agent if ID provided
-	if req.AgentId > 0 {
+	if req.AgentId != "" {
 		// Verify if this agent exists in our DB
 		existing, err := s.jobService.GetAgent(ctx, req.AgentId)
 		if err == nil && existing != nil {
-			log.Printf("Reusing existing Agent ID: %d", existing.ID)
+			log.Printf("Reusing existing Agent ID: %s", existing.ID)
 			agent = existing
 			// Update heartbeat immediately
 			_ = s.jobService.UpdateAgentHeartbeat(ctx, agent.ID)
 		} else {
-			log.Printf("Agent requested ID %d but not found or error: %v", req.AgentId, err)
+			log.Printf("Agent requested ID %s but not found or error: %v", req.AgentId, err)
 		}
 	}
 
@@ -514,7 +521,7 @@ func (s *Server) Auth(ctx context.Context, req *proto.AuthRequest) (*proto.AuthR
 		log.Printf("Looking up agent by Hostname: %s", req.Hostname)
 		existing, err := s.jobService.GetAgentByName(ctx, req.Hostname)
 		if err == nil && existing != nil {
-			log.Printf("Found existing Agent by Hostname: %s -> ID: %d", req.Hostname, existing.ID)
+			log.Printf("Found existing Agent by Hostname: %s -> ID: %s", req.Hostname, existing.ID)
 			agent = existing
 			// Update heartbeat immediately
 			_ = s.jobService.UpdateAgentHeartbeat(ctx, agent.ID)
@@ -534,7 +541,7 @@ func (s *Server) Auth(ctx context.Context, req *proto.AuthRequest) (*proto.AuthR
 			_, _ = s.jobService.UpdateAgentInfo(ctx, agent.ID, req.Hostname, "", "", "", 0)
 		}
 
-		log.Printf("Created new Agent ID: %d", agent.ID)
+		log.Printf("Created new Agent ID: %s", agent.ID)
 	}
 
 	// 3. Generate session
@@ -549,6 +556,6 @@ func (s *Server) Auth(ctx context.Context, req *proto.AuthRequest) (*proto.AuthR
 }
 
 // SendCommand sends a command to a specific agent
-func (s *Server) SendCommand(agentID int64, cmd string) bool {
+func (s *Server) SendCommand(agentID string, cmd string) bool {
 	return s.agentManager.SendCommand(agentID, cmd)
 }

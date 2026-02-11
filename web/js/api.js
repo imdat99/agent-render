@@ -41,11 +41,26 @@ export async function fetchJobs(offset = 0, limit = 20, agentId) {
     }
 }
 
-export async function createJob(image, command) {
+export async function createJob(image, command, name, userId, priority, timeLimit) {
     try {
+        const pri = parseInt(priority);
+        const limit = parseInt(timeLimit);
+
+        const body = {
+            image,
+            command,
+            env: {},
+            name: name || '',
+            user_id: userId || 'user-default',
+            priority: isNaN(pri) ? 0 : pri,
+            time_limit: isNaN(limit) ? 300 : limit
+        };
+
+        console.log("Sending CreateJob payload:", body);
+
         const res = await fetch(`${API_URL}/api/jobs`, {
             method: 'POST',
-            body: JSON.stringify({ image, command, env: {} }),
+            body: JSON.stringify(body),
             headers: { 'Content-Type': 'application/json' }
         });
 

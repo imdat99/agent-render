@@ -127,10 +127,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateJobRequest struct {
-	Command  string            `json:"command"`
-	Image    string            `json:"image"`
-	Env      map[string]string `json:"env"`
-	Priority int               `json:"priority"` // 0-10, higher = more priority
+	Command   string            `json:"command"`
+	Image     string            `json:"image"`
+	Env       map[string]string `json:"env"`
+	Priority  int               `json:"priority"` // 0-10, higher = more priority
+	UserID    string            `json:"user_id"`
+	Name      string            `json:"name"`       // Job name
+	TimeLimit int64             `json:"time_limit"` // In seconds
 }
 
 func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +194,7 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		"priority":    req.Priority,
 	})
 
-	job, err := s.jobService.CreateJob(r.Context(), req.Image, configBytes, req.Priority)
+	job, err := s.jobService.CreateJob(r.Context(), req.UserID, req.Name, req.Image, configBytes, req.Priority, req.TimeLimit)
 	if err != nil {
 		http.Error(w, `{"error": "Failed to create job", "details": "`+err.Error()+`"}`, http.StatusInternalServerError)
 		return
@@ -223,11 +226,16 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	agentID, _ := strconv.ParseInt(r.URL.Query().Get("agent_id"), 10, 64)
+	// Parse agentID if provided
+	var agentID string
+	agentIDStr := r.URL.Query().Get("agent_id")
+	if agentIDStr != "" {
+		agentID = agentIDStr
+	}
 
 	var result *services.PaginatedJobs
 	var err error
-	if agentID > 0 {
+	if agentID != "" {
 		result, err = s.jobService.ListJobsByAgent(r.Context(), agentID, offset, limit)
 	} else {
 		result, err = s.jobService.ListJobs(r.Context(), offset, limit)
@@ -322,13 +330,7 @@ func (s *Server) handleRetryJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRestartAgent(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid agent ID", http.StatusBadRequest)
-		return
-	}
-
+	id := chi.URLParam(r, "id")
 	if s.grpcServer.SendCommand(id, "restart") {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "restart command sent"})
@@ -338,13 +340,7 @@ func (s *Server) handleRestartAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid agent ID", http.StatusBadRequest)
-		return
-	}
-
+	id := chi.URLParam(r, "id")
 	if s.grpcServer.SendCommand(id, "update") {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "update command sent"})

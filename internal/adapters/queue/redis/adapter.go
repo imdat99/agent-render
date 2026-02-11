@@ -134,7 +134,7 @@ func (r *RedisAdapter) Subscribe(ctx context.Context, jobID string) (<-chan doma
 	return ch, nil
 }
 
-func (r *RedisAdapter) PublishResource(ctx context.Context, agentID int64, data []byte) error {
+func (r *RedisAdapter) PublishResource(ctx context.Context, agentID string, data []byte) error {
 	// data is assumed to be JSON {"cpu":..., "ram":...}
 	// We want to wrap it in SystemResource struct
 	var res map[string]interface{}
@@ -186,14 +186,14 @@ func (r *RedisAdapter) SubscribeResources(ctx context.Context) (<-chan domain.Sy
 }
 
 // Cancel PubSub implementation
-func (r *RedisAdapter) PublishCancel(ctx context.Context, agentID int64, jobID string) error {
-	channel := fmt.Sprintf("agent:%d:cancels", agentID)
+func (r *RedisAdapter) PublishCancel(ctx context.Context, agentID string, jobID string) error {
+	channel := fmt.Sprintf("agent:%s:cancels", agentID)
 	// Publish just the job ID
 	return r.client.Publish(ctx, channel, jobID).Err()
 }
 
-func (r *RedisAdapter) SubscribeCancel(ctx context.Context, agentID int64) (<-chan string, error) {
-	channel := fmt.Sprintf("agent:%d:cancels", agentID)
+func (r *RedisAdapter) SubscribeCancel(ctx context.Context, agentID string) (<-chan string, error) {
+	channel := fmt.Sprintf("agent:%s:cancels", agentID)
 	pubsub := r.client.Subscribe(ctx, channel)
 	ch := make(chan string)
 

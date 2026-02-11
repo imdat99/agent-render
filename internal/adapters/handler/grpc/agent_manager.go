@@ -9,7 +9,7 @@ import (
 
 // AgentInfo stores in-memory agent information
 type AgentInfo struct {
-	ID            int64
+	ID            string
 	Name          string
 	Platform      string
 	Backend       string
@@ -25,18 +25,18 @@ type AgentInfo struct {
 // AgentManager manages active agent connections in memory
 type AgentManager struct {
 	mu     sync.RWMutex
-	agents map[int64]*AgentInfo // AgentID -> AgentInfo
+	agents map[string]*AgentInfo // AgentID -> AgentInfo
 }
 
 // NewAgentManager creates a new in-memory agent manager
 func NewAgentManager() *AgentManager {
 	return &AgentManager{
-		agents: make(map[int64]*AgentInfo),
+		agents: make(map[string]*AgentInfo),
 	}
 }
 
 // Register adds or updates an agent in memory
-func (am *AgentManager) Register(id int64, name, platform, backend, version string, capacity int32) {
+func (am *AgentManager) Register(id string, name, platform, backend, version string, capacity int32) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
@@ -66,7 +66,7 @@ func (am *AgentManager) Register(id int64, name, platform, backend, version stri
 }
 
 // GetCommandChannel returns the command channel for an agent
-func (am *AgentManager) GetCommandChannel(id int64) (chan string, bool) {
+func (am *AgentManager) GetCommandChannel(id string) (chan string, bool) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
@@ -77,7 +77,7 @@ func (am *AgentManager) GetCommandChannel(id int64) (chan string, bool) {
 }
 
 // SendCommand sends a command to a specific agent
-func (am *AgentManager) SendCommand(id int64, cmd string) bool {
+func (am *AgentManager) SendCommand(id string, cmd string) bool {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
@@ -94,7 +94,7 @@ func (am *AgentManager) SendCommand(id int64, cmd string) bool {
 }
 
 // UpdateHeartbeat updates the last heartbeat time for an agent
-func (am *AgentManager) UpdateHeartbeat(id int64) {
+func (am *AgentManager) UpdateHeartbeat(id string) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
@@ -104,7 +104,7 @@ func (am *AgentManager) UpdateHeartbeat(id int64) {
 }
 
 // UpdateResources updates the CPU and RAM usage for an agent
-func (am *AgentManager) UpdateResources(id int64, cpu, ram float64) {
+func (am *AgentManager) UpdateResources(id string, cpu, ram float64) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
@@ -116,7 +116,7 @@ func (am *AgentManager) UpdateResources(id int64, cpu, ram float64) {
 }
 
 // Unregister removes an agent from memory
-func (am *AgentManager) Unregister(id int64) {
+func (am *AgentManager) Unregister(id string) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
@@ -124,7 +124,7 @@ func (am *AgentManager) Unregister(id int64) {
 }
 
 // Get retrieves an agent by ID
-func (am *AgentManager) Get(id int64) (*AgentInfo, bool) {
+func (am *AgentManager) Get(id string) (*AgentInfo, bool) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
