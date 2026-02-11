@@ -217,7 +217,7 @@ func (a *Agent) register(ctx context.Context) error {
 	_, err = a.client.RegisterAgent(mdCtx, &proto.RegisterAgentRequest{
 		Info: &proto.AgentInfo{
 			Platform: "linux/amd64",
-			Backend:  "docker",
+			Backend:  "ffmpeg",
 			Version:  "custom-v1",
 			Capacity: int32(a.capacity),
 			CustomLabels: map[string]string{
